@@ -90,6 +90,7 @@ class FreeRideService : Service() {
     @Inject lateinit var gpsManager: GpsManager
     @Inject lateinit var sessionDao: SessionDao
     @Inject lateinit var gpsDao: GpsDao
+    @Inject lateinit var sensorReadingDao: SensorReadingDao
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val binder = LocalBinder()
@@ -113,6 +114,9 @@ class FreeRideService : Service() {
 
     private val hrReadings = mutableListOf<Int>()
     private val hr2Readings = mutableListOf<Int>()
+    // Último valor de cada pulsómetro, para guardar 1 lectura por segundo
+    @Volatile private var currentHr1: Int? = null
+    @Volatile private var currentHr2: Int? = null
     private val cadenceReadings = mutableListOf<Float>()
     private val gpsPointsBuffer = mutableListOf<GpsPointEntity>()
 
@@ -254,6 +258,7 @@ class FreeRideService : Service() {
                         }
                         is HeartRateReading.Value -> {
                             Log.d(TAG, "❤️ HR1: Valor recibido: ${reading.bpm} bpm")
+                            currentHr1 = reading.bpm
                             _stats.update {
                                 it.copy(
                                     isHrScanning = false,
@@ -276,10 +281,12 @@ class FreeRideService : Service() {
                             }
                         }
                         is HeartRateReading.Disconnected -> {
+                            currentHr1 = null
                             Log.d(TAG, "❤️ HR1: Desconectado")
                             _stats.update { it.copy(isHrScanning = false, isHrConnected = false) }
                         }
                         is HeartRateReading.Error -> {
+                            currentHr1 = null
                             Log.e(TAG, "❤️ HR1: Error - ${reading.message}")
                             _stats.update { it.copy(isHrScanning = false, isHrConnected = false) }
                         }
@@ -308,6 +315,7 @@ class FreeRideService : Service() {
                     when (reading) {
                         is HeartRateReading.Value -> {
                             Log.d(TAG, "❤️2 HR2: Valor recibido: ${reading.bpm} bpm")
+                            currentHr2 = reading.bpm
                             // Si HR1 no está conectado o no tiene valor, usar HR2
                             val currentHr = _stats.value.heartRate
                             if (currentHr == 0 || !_stats.value.isHrConnected) {
@@ -341,6 +349,7 @@ class FreeRideService : Service() {
                             }
                         }
                         is HeartRateReading.Disconnected -> {
+                            currentHr2 = null
                             Log.d(TAG, "❤️2 HR2: Desconectado")
                             // Solo actualizar si HR1 tampoco está conectado
                             if (!_stats.value.isHrConnected) {
@@ -425,7 +434,8 @@ class FreeRideService : Service() {
 
     fun reconnectSensors() {
         Log.d(TAG, "🔄 Reconectando sensores...")
-        stopAllTracking()
+        // Solo sensores: el cronómetro de la ruta debe seguir corriendo
+        stopSensorCollectors()
 
         serviceScope.launch {
             delay(500)
@@ -446,6 +456,8 @@ class FreeRideService : Service() {
         currentSessionId = UUID.randomUUID().toString()
         hrReadings.clear()
         hr2Readings.clear()
+        currentHr1 = null
+        currentHr2 = null
         cadenceReadings.clear()
         gpsPointsBuffer.clear()
         _laps.update { emptyList() }
@@ -504,6 +516,7 @@ class FreeRideService : Service() {
         if (!_stats.value.isRunning || _stats.value.isPaused) return
 
         timerJob?.cancel()
+        gpsManager.pause()
         _stats.update { it.copy(isPaused = true) }
         updateNotification("Pausado", "Toca para continuar")
 
@@ -514,13 +527,15 @@ class FreeRideService : Service() {
         if (!_stats.value.isPaused) return
 
         _stats.update { it.copy(isPaused = false) }
+        gpsManager.resume()
         startTimer()
         updateNotification("En Ruta", "Grabando actividad...")
 
         Log.d(TAG, "▶️ Ruta reanudada")
     }
 
-    fun stopRide() {
+    /** Finaliza la ruta; [onSaved] se llama cuando las estadísticas ya están en la DB */
+    fun stopRide(onSaved: (() -> Unit)? = null) {
         Log.d(TAG, "🛑 Finalizando ruta...")
 
         timerJob?.cancel()
@@ -528,6 +543,7 @@ class FreeRideService : Service() {
 
         serviceScope.launch {
             saveFinalStats()
+            onSaved?.let { withContext(Dispatchers.Main) { it() } }
         }
 
         _stats.update { it.copy(isRunning = false, isPaused = false) }
@@ -672,6 +688,8 @@ class FreeRideService : Service() {
                     )
                 }
 
+                saveSensorReading()
+
                 if (_stats.value.totalTimeSeconds % 30 == 0) {
                     val time = formatDuration(_stats.value.totalTimeSeconds)
                     val dist = String.format("%.2f km", _stats.value.totalDistanceMeters / 1000f)
@@ -811,6 +829,27 @@ class FreeRideService : Service() {
         }
     }
 
+    /** Guarda HR1/HR2/cadencia cada segundo para la gráfica del detalle de sesión */
+    private fun saveSensorReading() {
+        val sessionId = currentSessionId ?: return
+        val s = _stats.value
+        val reading = SensorReadingEntity(
+            sessionId = sessionId,
+            timestamp = System.currentTimeMillis(),
+            heartRate = currentHr1?.takeIf { it > 0 },
+            heartRate2 = currentHr2?.takeIf { it > 0 },
+            cadence = s.cadence.takeIf { s.isCadenceConnected && it > 0f },
+            phase = "FREE_RIDE",
+            round = s.lapsCount + 1
+        )
+        if (reading.heartRate == null && reading.heartRate2 == null && reading.cadence == null) return
+        serviceScope.launch {
+            try { sensorReadingDao.insertReading(reading) } catch (e: Exception) {
+                Log.e(TAG, "Error guardando lectura: ${e.message}")
+            }
+        }
+    }
+
     private suspend fun saveFinalStats() {
         currentSessionId?.let { sessionId ->
             val stats = _stats.value
@@ -821,11 +860,14 @@ class FreeRideService : Service() {
                     session.copy(
                         endTime = System.currentTimeMillis(),
                         totalTimeSeconds = stats.totalTimeSeconds,
-                        avgHeartRate = if (hrReadings.isNotEmpty() || hr2Readings.isNotEmpty()) {
-                            (hrReadings + hr2Readings).average().toInt()
-                        } else null,
-                        maxHeartRate = (hrReadings + hr2Readings).maxOrNull(),
-                        minHeartRate = (hrReadings + hr2Readings).filter { it > 0 }.minOrNull(),
+                        // HR1 y HR2 por separado (antes se mezclaban en una sola media)
+                        avgHeartRate = hrReadings.takeIf { it.isNotEmpty() }?.average()?.toInt()
+                            ?: hr2Readings.takeIf { it.isNotEmpty() }?.average()?.toInt(),
+                        maxHeartRate = hrReadings.maxOrNull() ?: hr2Readings.maxOrNull(),
+                        minHeartRate = (hrReadings.ifEmpty { hr2Readings }).filter { it > 0 }.minOrNull(),
+                        avgHeartRate2 = if (hrReadings.isNotEmpty()) hr2Readings.takeIf { it.isNotEmpty() }?.average()?.toInt() else null,
+                        maxHeartRate2 = if (hrReadings.isNotEmpty()) hr2Readings.maxOrNull() else null,
+                        minHeartRate2 = if (hrReadings.isNotEmpty()) hr2Readings.filter { it > 0 }.minOrNull() else null,
                         avgCadence = if (cadenceReadings.isNotEmpty()) cadenceReadings.average().toFloat() else null,
                         maxCadence = cadenceReadings.maxOrNull(),
                         totalDistanceMeters = gpsStats.totalDistanceMeters,
@@ -841,6 +883,10 @@ class FreeRideService : Service() {
 
     private fun stopAllTracking() {
         timerJob?.cancel()
+        stopSensorCollectors()
+    }
+
+    private fun stopSensorCollectors() {
         hrCollectorJob?.cancel()
         hr2CollectorJob?.cancel()
         cadenceCollectorJob?.cancel()

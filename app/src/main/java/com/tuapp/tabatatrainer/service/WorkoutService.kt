@@ -30,6 +30,7 @@ class WorkoutService : Service() {
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "workout_channel"
 
+        private const val HR_STALE_MS = 5_000L
         private const val MAX_SENSOR_READINGS = 21600  // Máximo 6 horas de datos (1 por segundo), cubre cualquier entrenamiento sin recortar la gráfica
     }
 
@@ -71,6 +72,20 @@ class WorkoutService : Service() {
     private val cadenceReadingsLock = Any()
     
     // Funciones thread-safe para agregar elementos
+    // Último valor recibido de cada pulsómetro. Las series se muestrean 1 vez por segundo
+    // en el tick del entrenamiento (0 = sin dato ese segundo) para que HR1 y HR2 queden
+    // alineadas en el tiempo y no cuenten pausas ni la espera antes de empezar.
+    @Volatile private var lastHr1 = 0
+    @Volatile private var lastHr1Ms = 0L
+    @Volatile private var lastHr2 = 0
+    @Volatile private var lastHr2Ms = 0L
+
+    private fun sampleHeartRates() {
+        val now = System.currentTimeMillis()
+        addHrReading(if (now - lastHr1Ms < HR_STALE_MS) lastHr1 else 0)
+        addHr2Reading(if (now - lastHr2Ms < HR_STALE_MS) lastHr2 else 0)
+    }
+
     private fun addHrReading(bpm: Int) {
         synchronized(hrReadingsLock) {
             hrReadings.add(bpm)
@@ -250,6 +265,7 @@ class WorkoutService : Service() {
     fun pauseWorkout() {
         if (!_workoutState.value.isRunning || _workoutState.value.isPaused) return
         timerJob?.cancel()
+        gpsManager.pause()
         _workoutState.update { it.copy(isPaused = true) }
         updateNotification("Pausado", "Toca para continuar")
     }
@@ -257,6 +273,7 @@ class WorkoutService : Service() {
     fun resumeWorkout() {
         if (!_workoutState.value.isPaused) return
         _workoutState.update { it.copy(isPaused = false) }
+        gpsManager.resume()
         startTimer()
         updateNotification(
             _workoutState.value.phase.displayName,
@@ -274,6 +291,7 @@ class WorkoutService : Service() {
         _sessionStats.value = SessionStats()
         currentSessionId = null
         hrReadings.clear()
+        hr2Readings.clear()
         cadenceReadings.clear()
         cadence2Readings.clear()
         gpsPointsBuffer.clear()
@@ -320,7 +338,7 @@ class WorkoutService : Service() {
                         }
                     }
                     is HeartRateReading.Value -> {
-                        addHrReading(reading.bpm)
+                        lastHr1 = reading.bpm; lastHr1Ms = System.currentTimeMillis()
                         _sensorState.update {
                             it.copy(heartRate = reading.bpm, hrErrorMessage = null)
                         }
@@ -424,7 +442,7 @@ class WorkoutService : Service() {
         if (!isGpsEnabled) return
         
         gpsCollectorJob?.cancel()
-        gpsManager.resetStats()
+        // No resetear stats: se perdería la distancia acumulada del entreno en curso
         startGpsTracking()
     }
 
@@ -578,6 +596,7 @@ class WorkoutService : Service() {
             }
         }
         
+        sampleHeartRates()
         updateStats()
         saveSensorReading()
     }
@@ -669,7 +688,7 @@ class WorkoutService : Service() {
                         }
                     }
                     is HeartRateReading.Value -> {
-                        addHrReading(reading.bpm)
+                        lastHr1 = reading.bpm; lastHr1Ms = System.currentTimeMillis()
                         _sensorState.update { 
                             it.copy(heartRate = reading.bpm, hrErrorMessage = null) 
                         }
@@ -735,7 +754,7 @@ class WorkoutService : Service() {
                         }
                     }
                     is HeartRateReading.Value -> {
-                        addHr2Reading(reading.bpm)
+                        lastHr2 = reading.bpm; lastHr2Ms = System.currentTimeMillis()
                         _sensorState.update { 
                             it.copy(heartRate2 = reading.bpm, hr2ErrorMessage = null) 
                         }
@@ -1030,12 +1049,14 @@ class WorkoutService : Service() {
 
     private suspend fun saveFinalStats(isCompleted: Boolean, completedRounds: Int) {
         currentSessionId?.let { sessionId ->
-            val avgHr = if (hrReadings.isNotEmpty()) hrReadings.average().toInt() else null
-            val maxHr = hrReadings.maxOrNull()
-            val minHr = hrReadings.filter { it > 0 }.minOrNull()
-            val avgHr2 = if (hr2Readings.isNotEmpty()) hr2Readings.average().toInt() else null
-            val maxHr2 = hr2Readings.maxOrNull()
-            val minHr2 = hr2Readings.filter { it > 0 }.minOrNull()
+            val hr1 = synchronized(hrReadingsLock) { hrReadings.filter { it > 0 } }
+            val hr2 = synchronized(hr2ReadingsLock) { hr2Readings.filter { it > 0 } }
+            val avgHr = if (hr1.isNotEmpty()) hr1.average().toInt() else null
+            val maxHr = hr1.maxOrNull()
+            val minHr = hr1.minOrNull()
+            val avgHr2 = if (hr2.isNotEmpty()) hr2.average().toInt() else null
+            val maxHr2 = hr2.maxOrNull()
+            val minHr2 = hr2.minOrNull()
             val avgCad = if (cadenceReadings.isNotEmpty()) cadenceReadings.average().toFloat() else null
             val maxCad = cadenceReadings.maxOrNull()
             
@@ -1126,12 +1147,14 @@ class WorkoutService : Service() {
         }
         
         // Procesar las copias snapshot (thread-safe)
-        val avgHr = if (hrReadingsSnapshot.isNotEmpty()) hrReadingsSnapshot.average().toInt() else 0
-        val maxHr = hrReadingsSnapshot.maxOrNull() ?: 0
-        val minHr = hrReadingsSnapshot.filter { it > 0 }.minOrNull() ?: 0
-        val avgHr2 = if (hr2ReadingsSnapshot.isNotEmpty()) hr2ReadingsSnapshot.average().toInt() else 0
-        val maxHr2 = hr2ReadingsSnapshot.maxOrNull() ?: 0
-        val minHr2 = hr2ReadingsSnapshot.filter { it > 0 }.minOrNull() ?: 0
+        val hr1Valid = hrReadingsSnapshot.filter { it > 0 }
+        val hr2Valid = hr2ReadingsSnapshot.filter { it > 0 }
+        val avgHr = if (hr1Valid.isNotEmpty()) hr1Valid.average().toInt() else 0
+        val maxHr = hr1Valid.maxOrNull() ?: 0
+        val minHr = hr1Valid.minOrNull() ?: 0
+        val avgHr2 = if (hr2Valid.isNotEmpty()) hr2Valid.average().toInt() else 0
+        val maxHr2 = hr2Valid.maxOrNull() ?: 0
+        val minHr2 = hr2Valid.minOrNull() ?: 0
         val avgCad = if (cadenceReadingsSnapshot.isNotEmpty()) cadenceReadingsSnapshot.average().toFloat() else 0f
         val maxCad = cadenceReadingsSnapshot.maxOrNull() ?: 0f
         val avgCad2 = if (cadence2ReadingsSnapshot.isNotEmpty()) cadence2ReadingsSnapshot.average().toFloat() else 0f

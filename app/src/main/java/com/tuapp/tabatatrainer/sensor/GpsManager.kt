@@ -76,13 +76,17 @@ class GpsManager @Inject constructor(
     private var lastValidLocation: Location? = null  // ⚡ Última posición válida (cuando está parado)
     private var totalDistance: Float = 0f
     private var maxSpeed: Float = 0f
-    private var speedReadings = mutableListOf<Float>()
     private var pointsCount: Int = 0
     private var filteredPointsCount: Int = 0  // ⚡ Contador de puntos filtrados
 
     // Para cálculo de desnivel
     private var previousAltitude: Double? = null
     private var elevationGain: Float = 0f
+
+    // Tiempo en movimiento (excluye pausas) para la velocidad media = distancia / tiempo
+    @Volatile private var isPaused = false
+    private var activeStartMs: Long = 0L
+    private var accumulatedActiveMs: Long = 0L
 
     fun hasLocationPermission(): Boolean {
         return ContextCompat.checkSelfPermission(
@@ -102,12 +106,35 @@ class GpsManager @Inject constructor(
         lastValidLocation = null
         totalDistance = 0f
         maxSpeed = 0f
-        speedReadings.clear()
         pointsCount = 0
         filteredPointsCount = 0
         previousAltitude = null
         elevationGain = 0f
+        isPaused = false
+        accumulatedActiveMs = 0L
+        activeStartMs = System.currentTimeMillis()
         Log.d(TAG, "Stats reseteadas")
+    }
+
+    /**
+     * Pausa la acumulación de distancia, desnivel y velocidad máxima.
+     * Las posiciones se siguen recibiendo (para el mapa), pero no cuentan para las estadísticas.
+     */
+    fun pause() {
+        if (isPaused) return
+        accumulatedActiveMs += System.currentTimeMillis() - activeStartMs
+        isPaused = true
+    }
+
+    fun resume() {
+        if (!isPaused) return
+        activeStartMs = System.currentTimeMillis()
+        isPaused = false
+    }
+
+    private fun activeSeconds(): Float {
+        val runningMs = if (isPaused) 0L else System.currentTimeMillis() - activeStartMs
+        return (accumulatedActiveMs + runningMs) / 1000f
     }
 
     /**
@@ -119,9 +146,9 @@ class GpsManager @Inject constructor(
      * Obtiene las estadísticas actuales
      */
     fun getCurrentStats(): GpsStats {
-        val avgSpeed = if (speedReadings.isNotEmpty()) {
-            speedReadings.average().toFloat()
-        } else 0f
+        // Velocidad media real: distancia total / tiempo en movimiento (sin pausas)
+        val seconds = activeSeconds()
+        val avgSpeed = if (seconds > 0f) totalDistance / seconds else 0f
 
         // Calcular velocidad actual: si está parado (velocidad < SNT), mostrar 0
         val currentSpeed = lastLocation?.speed ?: 0f
@@ -196,12 +223,6 @@ class GpsManager @Inject constructor(
                         val lastValid = lastValidLocation  // Guardar referencia local para smart cast
                         if (!hasValidSpeed && hasGoodAccuracy && lastValid != null) {
                             // Está parado: mantener posición anclada, velocidad = 0
-                            // Añadir velocidad 0 para promedios
-                            speedReadings.add(0f)
-                            if (speedReadings.size > 3600) {
-                                speedReadings.removeAt(0)
-                            }
-                            
                             // Emitir última posición válida con velocidad 0 (para actualizar UI sin mover punto)
                             val reading = GpsReading(
                                 latitude = lastValid.latitude,
@@ -228,8 +249,10 @@ class GpsManager @Inject constructor(
                     val distanceToAdd = if (lastValid != null) {
                         val distance = lastValid.distanceTo(locationToUse)
                         
-                        // Verificar que no sea un salto GPS anómalo
-                        if (distance <= MAX_DISTANCE_JUMP_METERS) {
+                        // Verificar que no sea un salto GPS anómalo (y no sumar en pausa)
+                        if (isPaused) {
+                            0f
+                        } else if (distance <= MAX_DISTANCE_JUMP_METERS) {
                             totalDistance += distance
                             distance
                         } else {
@@ -245,7 +268,7 @@ class GpsManager @Inject constructor(
                     locationToUse.altitude.let { altitude ->
                         previousAltitude?.let { prevAlt ->
                             val diff = altitude - prevAlt
-                            if (diff > 0 && diff < 50) {  // Evitar saltos de altitud
+                            if (!isPaused && diff > 0 && diff < 50) {  // Evitar saltos de altitud
                                 elevationGain += diff.toFloat()
                             }
                         }
@@ -253,16 +276,8 @@ class GpsManager @Inject constructor(
                     }
 
                     // Actualizar velocidad máxima
-                    if (locationToUse.hasSpeed() && locationToUse.speed > maxSpeed) {
+                    if (!isPaused && locationToUse.hasSpeed() && locationToUse.speed > maxSpeed) {
                         maxSpeed = locationToUse.speed
-                    }
-
-                    // Guardar velocidad para promedio
-                    if (locationToUse.hasSpeed()) {
-                        speedReadings.add(locationToUse.speed)
-                        if (speedReadings.size > 3600) {
-                            speedReadings.removeAt(0)
-                        }
                     }
 
                     // Actualizar última ubicación válida

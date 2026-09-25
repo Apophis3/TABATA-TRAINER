@@ -421,12 +421,13 @@ private fun MetricsGrid(
     val hr2ValidReadings = readings.mapNotNull { it.heartRate2?.takeIf { it > 0 } }
     val cadenceValidReadings = readings.mapNotNull { it.cadence?.takeIf { it > 0f } }
     
-    // Calcular promedios y máximos desde los datos válidos
-    val avgHr1 = if (hr1ValidReadings.isNotEmpty()) hr1ValidReadings.average().toInt() else null
-    val maxHr1 = if (hr1ValidReadings.isNotEmpty()) hr1ValidReadings.max() else null
-    val avgHr2 = if (hr2ValidReadings.isNotEmpty()) hr2ValidReadings.average().toInt() else null
-    val maxHr2 = if (hr2ValidReadings.isNotEmpty()) hr2ValidReadings.max() else null
-    val avgCadence = if (cadenceValidReadings.isNotEmpty()) cadenceValidReadings.average().toFloat() else null
+    // Calcular promedios y máximos desde los datos válidos.
+    // Si la sesión no tiene lecturas por segundo (p.ej. rutas antiguas), usar los valores guardados en la sesión.
+    val avgHr1 = if (hr1ValidReadings.isNotEmpty()) hr1ValidReadings.average().toInt() else session.avgHeartRate
+    val maxHr1 = if (hr1ValidReadings.isNotEmpty()) hr1ValidReadings.max() else session.maxHeartRate
+    val avgHr2 = if (hr2ValidReadings.isNotEmpty()) hr2ValidReadings.average().toInt() else session.avgHeartRate2
+    val maxHr2 = if (hr2ValidReadings.isNotEmpty()) hr2ValidReadings.max() else session.maxHeartRate2
+    val avgCadence = if (cadenceValidReadings.isNotEmpty()) cadenceValidReadings.average().toFloat() else session.avgCadence
     
     // Primera fila: HR1, HR1 Máx, Cadencia
     Row(

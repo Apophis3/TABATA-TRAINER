@@ -30,6 +30,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
@@ -1189,11 +1190,12 @@ private fun GpsMetricCardSmall(
 
 @Composable
 private fun HeartRateGraph(
-    readings: List<Int>, 
+    readings: List<Int>,
     readings2: List<Int> = emptyList(),
     modifier: Modifier = Modifier
 ) {
-    if (readings.isEmpty() && readings2.isEmpty()) {
+    // Cada lista tiene 1 muestra por segundo de entrenamiento (0 = sin dato)
+    if (readings.none { it > 0 } && readings2.none { it > 0 }) {
         Box(
             modifier = modifier.background(Color.Black.copy(alpha = 0.15f), RoundedCornerShape(14.dp)),
             contentAlignment = Alignment.Center
@@ -1203,9 +1205,10 @@ private fun HeartRateGraph(
         return
     }
 
-    val allReadings = (readings + readings2).filter { it > 0 }
-    val minHr = if (allReadings.isNotEmpty()) (allReadings.minOrNull() ?: 60) - 10 else 50
-    val maxHr = if (allReadings.isNotEmpty()) (allReadings.maxOrNull() ?: 180) + 10 else 190
+    val totalSeconds = maxOf(readings.size, readings2.size).coerceAtLeast(2)
+    val valid = readings.filter { it > 0 } + readings2.filter { it > 0 }
+    val minHr = (valid.minOrNull() ?: 60) - 10
+    val maxHr = (valid.maxOrNull() ?: 180) + 10
     val range = (maxHr - minHr).coerceAtLeast(1)
 
     Canvas(
@@ -1213,87 +1216,74 @@ private fun HeartRateGraph(
             .background(Color.Black.copy(alpha = 0.25f), RoundedCornerShape(18.dp))
             .padding(16.dp)
     ) {
+        val labelSpace = 14.dp.toPx()
         val width = size.width
-        val height = size.height
-        
-        // Dibujar líneas de referencia horizontales
-        val gridLines = 5
-        for (i in 0..gridLines) {
-            val y = height * i / gridLines
-            val alpha = if (i == 0 || i == gridLines) 0.3f else 0.15f
+        val height = size.height - labelSpace
+        fun yOf(hr: Float) = height - ((hr - minHr) / range * height)
+
+        for (i in 0..5) {
+            val y = height * i / 5
             drawLine(
-                color = Color.White.copy(alpha = alpha),
-                start = Offset(0f, y),
-                end = Offset(width, y),
-                strokeWidth = 1f
+                color = Color.White.copy(alpha = if (i == 0 || i == 5) 0.3f else 0.15f),
+                start = Offset(0f, y), end = Offset(width, y), strokeWidth = 1f
             )
-            
-            // Etiquetas de valores en el eje Y (simplificado - sin texto por ahora para evitar complejidad)
         }
-        
-        if (readings.isNotEmpty() && readings.any { it > 0 }) {
-            val stepX = width / (readings.size - 1).coerceAtLeast(1)
+
+        // Marcas de tiempo en el eje X (cada 1/2/5/10/15/30/60 min según duración)
+        val totalMin = totalSeconds / 60f
+        val stepMin = listOf(1, 2, 5, 10, 15, 30, 60).firstOrNull { totalMin / it <= 6 } ?: 120
+        val paint = android.graphics.Paint().apply {
+            color = android.graphics.Color.argb(140, 255, 255, 255)
+            textSize = 10.sp.toPx()
+            isAntiAlias = true
+            textAlign = android.graphics.Paint.Align.CENTER
+        }
+        var m = stepMin
+        while (m * 60 < totalSeconds) {
+            val x = m * 60f / (totalSeconds - 1) * width
+            drawLine(Color.White.copy(alpha = 0.1f), Offset(x, 0f), Offset(x, height), 1f)
+            val label = if (m >= 60) "${m / 60}h${if (m % 60 > 0) "%02d".format(m % 60) else ""}" else "${m}'"
+            drawContext.canvas.nativeCanvas.drawText(label, x, size.height, paint)
+            m += stepMin
+        }
+
+        // Reduce a 1 columna cada ~2 px: línea con la media y banda con mín/máx del tramo,
+        // así 2 h de sesión (7200 muestras) se dibujan igual de fluidas que 5 min
+        fun drawSeries(data: List<Int>, color: Color) {
+            if (data.none { it > 0 }) return
+            val buckets = (width / 2f).toInt().coerceAtLeast(1)
+            val perBucket = (totalSeconds.toFloat() / buckets).coerceAtLeast(1f)
             val path = Path()
-            var pathStarted = false
-            readings.forEachIndexed { index, hr ->
-                if (hr > 0) {
-                    val x = index * stepX
-                    val y = height - ((hr - minHr).toFloat() / range * height)
-                    if (!pathStarted) {
-                        path.moveTo(x, y)
-                        pathStarted = true
-                    } else {
-                        path.lineTo(x, y)
-                    }
+            var started = false
+            var b = 0
+            while (b * perBucket < data.size) {
+                val from = (b * perBucket).toInt()
+                val to = minOf(data.size, ((b + 1) * perBucket).toInt().coerceAtLeast(from + 1))
+                var sum = 0; var n = 0; var lo = Int.MAX_VALUE; var hi = 0
+                for (i in from until to) {
+                    val v = data[i]
+                    if (v > 0) { sum += v; n++; if (v < lo) lo = v; if (v > hi) hi = v }
                 }
-            }
-            if (pathStarted) {
-                // Línea más gruesa y visible
-                drawPath(path = path, color = TabataColors.HrPink, style = Stroke(width = 5f))
-                
-                val lastValidIndex = readings.indexOfLast { it > 0 }
-                if (lastValidIndex >= 0) {
-                    val lastX = lastValidIndex * stepX
-                    val lastY = height - ((readings[lastValidIndex] - minHr).toFloat() / range * height)
-                    // Círculo más grande
-                    drawCircle(color = TabataColors.HrPink, radius = 10f, center = Offset(lastX, lastY))
-                    // Círculo interior blanco
-                    drawCircle(color = Color.White, radius = 5f, center = Offset(lastX, lastY))
+                val x = (from + to - 1) / 2f / (totalSeconds - 1) * width
+                if (n > 0) {
+                    if (hi > lo) drawLine(color.copy(alpha = 0.35f), Offset(x, yOf(hi.toFloat())), Offset(x, yOf(lo.toFloat())), 2f)
+                    val y = yOf(sum.toFloat() / n)
+                    if (started) path.lineTo(x, y) else { path.moveTo(x, y); started = true }
+                } else {
+                    started = false // hueco sin datos: cortar la línea
                 }
+                b++
             }
+            drawPath(path = path, color = color, style = Stroke(width = 4f))
+
+            val last = data.indexOfLast { it > 0 }
+            val center = Offset(last.toFloat() / (totalSeconds - 1) * width, yOf(data[last].toFloat()))
+            drawCircle(color = color, radius = 10f, center = center)
+            drawCircle(color = Color.White, radius = 5f, center = center)
         }
-        
-        if (readings2.isNotEmpty() && readings2.any { it > 0 }) {
-            val stepX2 = width / (readings2.size - 1).coerceAtLeast(1)
-            val path2 = Path()
-            var pathStarted = false
-            readings2.forEachIndexed { index, hr ->
-                if (hr > 0) {
-                    val x = index * stepX2
-                    val y = height - ((hr - minHr).toFloat() / range * height)
-                    if (!pathStarted) {
-                        path2.moveTo(x, y)
-                        pathStarted = true
-                    } else {
-                        path2.lineTo(x, y)
-                    }
-                }
-            }
-            if (pathStarted) {
-                // Línea más gruesa y visible
-                drawPath(path = path2, color = TabataColors.HrCyan, style = Stroke(width = 5f))
-                
-                val lastValidIndex = readings2.indexOfLast { it > 0 }
-                if (lastValidIndex >= 0) {
-                    val lastX2 = lastValidIndex * stepX2
-                    val lastY2 = height - ((readings2[lastValidIndex] - minHr).toFloat() / range * height)
-                    // Círculo más grande
-                    drawCircle(color = TabataColors.HrCyan, radius = 10f, center = Offset(lastX2, lastY2))
-                    // Círculo interior blanco
-                    drawCircle(color = Color.White, radius = 5f, center = Offset(lastX2, lastY2))
-                }
-            }
-        }
+
+        drawSeries(readings, TabataColors.HrPink)
+        drawSeries(readings2, TabataColors.HrCyan)
     }
 }
 

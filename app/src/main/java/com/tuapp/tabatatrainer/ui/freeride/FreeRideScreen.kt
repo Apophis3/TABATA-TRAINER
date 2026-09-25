@@ -109,8 +109,8 @@ fun FreeRideScreen(
     val onPause: () -> Unit = { service?.pauseRide() }
     val onResume: () -> Unit = { service?.resumeRide() }
     val onStop: () -> Unit = {
-        service?.stopRide()
-        stats.sessionId?.let { onViewSession(it) }
+        val id = stats.sessionId
+        service?.stopRide(onSaved = { id?.let { onViewSession(it) } })
     }
     val onLap: () -> Unit = { service?.addLap() }
     val onReconnect: () -> Unit = { service?.reconnectSensors() }
