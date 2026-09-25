@@ -31,14 +31,14 @@ if exist "%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" (
 
 echo ADB encontrado en: %ADB_PATH%
 echo.
-echo Conectando a 192.168.1.28:5555...
+echo Conectando a 192.168.1.29:5555...
 "%ADB_PATH%" connect 192.168.1.28:5555
 timeout /t 2 /nobreak >nul
 echo.
 echo Verificando conexion...
 "%ADB_PATH%" devices
 echo.
-"%ADB_PATH%" devices | findstr "192.168.1.28" >nul
+"%ADB_PATH%" devices | findstr "192.168.1.29" >nul
 if %ERRORLEVEL% EQU 0 (
     echo.
     echo ========================================
