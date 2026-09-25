@@ -14,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -27,7 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.tuapp.tabatatrainer.data.local.WorkoutPhase
 import com.tuapp.tabatatrainer.sensor.*
 import com.tuapp.tabatatrainer.service.WorkoutService
@@ -508,7 +509,7 @@ private fun CompactSensorRowWithGps(
 
                     // Cadencia
                     SensorStatusChip(
-                        icon = Icons.Default.DirectionsBike,
+                        icon = Icons.AutoMirrored.Filled.DirectionsBike,
                         label = "CAD",
                         isConnected = bleStatus.cadenceConnected,
                         isScanning = bleStatus.cadenceScanning,
@@ -756,7 +757,7 @@ private fun ActiveWorkoutBanner(
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
                     ) {
                         Icon(
-                            Icons.Default.ArrowForward,
+                            Icons.AutoMirrored.Filled.ArrowForward,
                             contentDescription = null,
                             tint = backgroundColor[0],
                             modifier = Modifier.size(16.dp)

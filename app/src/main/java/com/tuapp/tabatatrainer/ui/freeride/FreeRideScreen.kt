@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -163,7 +164,7 @@ fun FreeRideScreen(
                 .statusBarsPadding()
                 .padding(8.dp)
         ) {
-            Icon(Icons.Default.ArrowBack, "Volver", tint = Color.White)
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Volver", tint = Color.White)
         }
     }
 }
@@ -817,7 +818,7 @@ private fun LandscapeMetricsPage(
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 SensorDot(Icons.Default.GpsFixed, stats.isGpsConnected, stats.isGpsScanning, TabataColors.WorkGreen)
                 SensorDot(Icons.Default.Favorite, stats.isHrConnected, stats.isHrScanning, Color(0xFFE91E63))
-                SensorDot(Icons.Default.DirectionsBike, stats.isCadenceConnected, stats.isCadenceScanning, TabataColors.RoundsBlue)
+                SensorDot(Icons.AutoMirrored.Filled.DirectionsBike, stats.isCadenceConnected, stats.isCadenceScanning, TabataColors.RoundsBlue)
             }
 
             // Timer (MÁS GRANDE en horizontal)
@@ -906,7 +907,7 @@ private fun LandscapeLapsPage(
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 SensorDot(Icons.Default.GpsFixed, stats.isGpsConnected, stats.isGpsScanning, TabataColors.WorkGreen)
                 SensorDot(Icons.Default.Favorite, stats.isHrConnected, stats.isHrScanning, Color(0xFFE91E63))
-                SensorDot(Icons.Default.DirectionsBike, stats.isCadenceConnected, stats.isCadenceScanning, TabataColors.RoundsBlue)
+                SensorDot(Icons.AutoMirrored.Filled.DirectionsBike, stats.isCadenceConnected, stats.isCadenceScanning, TabataColors.RoundsBlue)
             }
 
             // Estado "EN RUTA"
@@ -1161,7 +1162,7 @@ private fun FreeRideSensorBar(stats: FreeRideStats, onReconnect: () -> Unit) {
     ) {
         SensorChipAnimated(Icons.Default.GpsFixed, "GPS", stats.isGpsConnected, stats.isGpsScanning, TabataColors.WorkGreen)
         SensorChipAnimated(Icons.Default.Favorite, "HR", stats.isHrConnected, stats.isHrScanning, Color(0xFFE91E63))
-        SensorChipAnimated(Icons.Default.DirectionsBike, "CAD", stats.isCadenceConnected, stats.isCadenceScanning, TabataColors.RoundsBlue)
+        SensorChipAnimated(Icons.AutoMirrored.Filled.DirectionsBike, "CAD", stats.isCadenceConnected, stats.isCadenceScanning, TabataColors.RoundsBlue)
         IconButton(onClick = onReconnect, modifier = Modifier.size(32.dp)) {
             Icon(Icons.Default.Refresh, "Reconectar", tint = Color.White.copy(alpha = 0.7f))
         }

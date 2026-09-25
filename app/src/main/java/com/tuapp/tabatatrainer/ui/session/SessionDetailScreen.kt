@@ -10,6 +10,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -25,7 +26,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tuapp.tabatatrainer.data.local.*
@@ -121,7 +122,7 @@ fun SessionDetailScreen(
                 title = { Text("Detalle de Sesión") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, "Volver")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Volver")
                     }
                 },
                 actions = {
@@ -442,7 +443,7 @@ private fun MetricsGrid(
         )
 
         MetricCard(
-            icon = Icons.Default.TrendingUp,
+            icon = Icons.AutoMirrored.Filled.TrendingUp,
             label = "HR1 Máx",
             value = maxHr1?.toString() ?: "--",
             unit = "bpm",
@@ -451,7 +452,7 @@ private fun MetricsGrid(
         )
 
         MetricCard(
-            icon = Icons.Default.DirectionsBike,
+            icon = Icons.AutoMirrored.Filled.DirectionsBike,
             label = "Cadencia",
             value = avgCadence?.let { String.format("%.0f", it) } ?: "--",
             unit = "rpm",
@@ -477,7 +478,7 @@ private fun MetricsGrid(
         )
 
         MetricCard(
-            icon = Icons.Default.TrendingUp,
+            icon = Icons.AutoMirrored.Filled.TrendingUp,
             label = "HR2 Máx",
             value = maxHr2?.toString() ?: "--",
             unit = "bpm",

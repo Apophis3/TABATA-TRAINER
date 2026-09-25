@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -79,7 +80,7 @@ fun CompactSensorRow(
 
                 // Cadencia
                 SensorIcon(
-                    icon = Icons.Default.DirectionsBike,
+                    icon = Icons.AutoMirrored.Filled.DirectionsBike,
                     isConnected = cadenceConnected,
                     isScanning = cadenceScanning,
                     label = "CAD"
@@ -617,7 +618,7 @@ fun SensorDataPanel(
                     isConnected = hrConnected
                 )
                 SensorValueCompact(
-                    icon = Icons.Default.DirectionsBike,
+                    icon = Icons.AutoMirrored.Filled.DirectionsBike,
                     value = cadence?.toString() ?: "--",
                     unit = "rpm",
                     isConnected = cadenceConnected
@@ -632,7 +633,7 @@ fun SensorDataPanel(
                 }
                 if (maxHeartRate != null) {
                     SensorValueCompact(
-                        icon = Icons.Default.TrendingUp,
+                        icon = Icons.AutoMirrored.Filled.TrendingUp,
                         value = maxHeartRate.toString(),
                         unit = "max",
                         isConnected = hrConnected
@@ -672,7 +673,7 @@ fun SensorDataPanel(
                         isConnected = hrConnected
                     )
                     SensorValueDisplay(
-                        icon = Icons.Default.DirectionsBike,
+                        icon = Icons.AutoMirrored.Filled.DirectionsBike,
                         value = cadence?.toString() ?: "--",
                         unit = "rpm",
                         label = "Cad",
@@ -686,7 +687,7 @@ fun SensorDataPanel(
                         isConnected = hrConnected
                     )
                     SensorValueDisplay(
-                        icon = Icons.Default.TrendingUp,
+                        icon = Icons.AutoMirrored.Filled.TrendingUp,
                         value = maxHeartRate?.toString() ?: "--",
                         unit = "bpm",
                         label = "Máx",
@@ -1016,7 +1017,7 @@ fun ActiveSensorIndicators(
         }
         if (cadenceConnected) {
             ActiveSensorChip(
-                icon = Icons.Default.DirectionsBike,
+                icon = Icons.AutoMirrored.Filled.DirectionsBike,
                 label = "Cadencia",
                 isConnected = true
             )

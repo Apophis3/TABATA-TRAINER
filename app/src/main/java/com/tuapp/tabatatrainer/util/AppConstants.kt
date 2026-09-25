@@ -18,12 +18,6 @@ object AppConstants {
     // Límites de datos
     // ============================================================================
     /**
-     * Máximo número de lecturas de sensores a guardar (1 por segundo)
-     * Equivale a aproximadamente 1 hora de datos
-     */
-    const val MAX_SENSOR_READINGS = 600
-    
-    /**
      * Máximo número de puntos GPS para el mapa en memoria
      */
     const val MAX_MAP_POINTS = 1000

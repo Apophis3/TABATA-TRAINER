@@ -35,7 +35,10 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "tabata_trainer_db"
                 )
-                    .fallbackToDestructiveMigration()  // Borra datos si cambia esquema
+                    // Migraciones explícitas: al cambiar el esquema NO se pierden las sesiones.
+                    // Solo se borra la DB si se instala una versión más antigua de la app.
+                    .addMigrations(*DatabaseMigrations.ALL_MIGRATIONS)
+                    .fallbackToDestructiveMigrationOnDowngrade(dropAllTables = true)
                     .build()
                 INSTANCE = instance
                 instance

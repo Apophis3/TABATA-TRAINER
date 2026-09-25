@@ -13,3 +13,4 @@ local.properties
 *.dex
 /app/build
 /app/release
+/backup_db_*

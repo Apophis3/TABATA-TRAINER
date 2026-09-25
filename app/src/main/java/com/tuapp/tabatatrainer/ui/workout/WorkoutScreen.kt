@@ -18,6 +18,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -213,7 +214,7 @@ fun WorkoutScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.ArrowBack,
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Volver",
                         tint = Color.White
                     )
@@ -641,7 +642,7 @@ private fun GpsMetricsPage(
         ) {
             GpsMetricCardSmall(
                 modifier = Modifier.weight(1f),
-                icon = Icons.Default.TrendingUp,
+                icon = Icons.AutoMirrored.Filled.TrendingUp,
                 title = "VEL. MÁX",
                 value = String.format("%.1f", sessionStats.maxSpeedKmh),
                 unit = "km/h",
@@ -809,14 +810,14 @@ private fun SensorStatusChips(sensorState: SensorState, gpsEnabled: Boolean) {
         )
         Spacer(modifier = Modifier.width(12.dp))
         SensorChip(
-            icon = Icons.Default.DirectionsBike,
+            icon = Icons.AutoMirrored.Filled.DirectionsBike,
             label = "C1",
             isConnected = sensorState.isCadenceConnected,
             isScanning = sensorState.isCadenceScanning
         )
         Spacer(modifier = Modifier.width(12.dp))
         SensorChip(
-            icon = Icons.Default.DirectionsBike,
+            icon = Icons.AutoMirrored.Filled.DirectionsBike,
             label = "C2",
             isConnected = sensorState.isCadence2Connected,
             isScanning = sensorState.isCadence2Scanning
@@ -843,9 +844,9 @@ private fun SensorStatusChipsCompact(sensorState: SensorState, gpsEnabled: Boole
         Spacer(modifier = Modifier.width(8.dp))
         SensorChipCompact(Icons.Default.Favorite, sensorState.isHr2Connected, sensorState.isHr2Scanning)
         Spacer(modifier = Modifier.width(8.dp))
-        SensorChipCompact(Icons.Default.DirectionsBike, sensorState.isCadenceConnected, sensorState.isCadenceScanning)
+        SensorChipCompact(Icons.AutoMirrored.Filled.DirectionsBike, sensorState.isCadenceConnected, sensorState.isCadenceScanning)
         Spacer(modifier = Modifier.width(8.dp))
-        SensorChipCompact(Icons.Default.DirectionsBike, sensorState.isCadence2Connected, sensorState.isCadence2Scanning)
+        SensorChipCompact(Icons.AutoMirrored.Filled.DirectionsBike, sensorState.isCadence2Connected, sensorState.isCadence2Scanning)
         if (gpsEnabled) {
             Spacer(modifier = Modifier.width(8.dp))
             SensorChipCompact(Icons.Default.LocationOn, sensorState.isGpsTracking, false)
@@ -940,14 +941,14 @@ private fun MetricsPanel(
         )
         // HR1 Máx
         MetricItem(
-            icon = Icons.Default.TrendingUp,
+            icon = Icons.AutoMirrored.Filled.TrendingUp,
             value = if (maxHeartRate > 0) "$maxHeartRate" else "--",
             unit = "bpm",
             label = "HR1 Máx"
         )
         // Cadencia 1
         MetricItem(
-            icon = Icons.Default.DirectionsBike,
+            icon = Icons.AutoMirrored.Filled.DirectionsBike,
             value = if (isCadenceConnected || cadence > 0) "${cadence.toInt()}" else "--",
             unit = "rpm",
             label = "C1",
@@ -964,7 +965,7 @@ private fun MetricsPanel(
         )
         // HR2 Máx
         MetricItem(
-            icon = Icons.Default.TrendingUp,
+            icon = Icons.AutoMirrored.Filled.TrendingUp,
             value = if (maxHeartRate2 > 0) "$maxHeartRate2" else "--",
             unit = "bpm",
             label = "HR2 Máx",
@@ -972,7 +973,7 @@ private fun MetricsPanel(
         )
         // Cadencia 2
         MetricItem(
-            icon = Icons.Default.DirectionsBike,
+            icon = Icons.AutoMirrored.Filled.DirectionsBike,
             value = if (isCadence2Connected || cadence2 > 0) "${cadence2.toInt()}" else "--",
             unit = "rpm",
             label = "C2",
@@ -1013,8 +1014,8 @@ private fun MetricsPanelCompact(
             verticalAlignment = Alignment.CenterVertically
         ) {
             MetricItemCompact(Icons.Default.Favorite, if (isHrConnected || heartRate > 0) "$heartRate" else "--", "HR1", TabataColors.HrPink)
-            MetricItemCompact(Icons.Default.TrendingUp, if (maxHeartRate > 0) "$maxHeartRate" else "--", "HR1 Máx", TabataColors.HrPink)
-            MetricItemCompact(Icons.Default.DirectionsBike, if (isCadenceConnected || cadence > 0) "${cadence.toInt()}" else "--", "C1", Color.White)
+            MetricItemCompact(Icons.AutoMirrored.Filled.TrendingUp, if (maxHeartRate > 0) "$maxHeartRate" else "--", "HR1 Máx", TabataColors.HrPink)
+            MetricItemCompact(Icons.AutoMirrored.Filled.DirectionsBike, if (isCadenceConnected || cadence > 0) "${cadence.toInt()}" else "--", "C1", Color.White)
         }
         
         Spacer(modifier = Modifier.height(12.dp))
@@ -1026,8 +1027,8 @@ private fun MetricsPanelCompact(
             verticalAlignment = Alignment.CenterVertically
         ) {
             MetricItemCompact(Icons.Default.Favorite, if (isHr2Connected || heartRate2 > 0) "$heartRate2" else "--", "HR2", TabataColors.HrCyan)
-            MetricItemCompact(Icons.Default.TrendingUp, if (maxHeartRate2 > 0) "$maxHeartRate2" else "--", "HR2 Máx", TabataColors.HrCyan)
-            MetricItemCompact(Icons.Default.DirectionsBike, if (isCadence2Connected || cadence2 > 0) "${cadence2.toInt()}" else "--", "C2", Color.White)
+            MetricItemCompact(Icons.AutoMirrored.Filled.TrendingUp, if (maxHeartRate2 > 0) "$maxHeartRate2" else "--", "HR2 Máx", TabataColors.HrCyan)
+            MetricItemCompact(Icons.AutoMirrored.Filled.DirectionsBike, if (isCadence2Connected || cadence2 > 0) "${cadence2.toInt()}" else "--", "C2", Color.White)
         }
     }
 }
