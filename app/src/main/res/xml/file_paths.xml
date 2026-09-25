@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Archivos externos de la app (Excel, GPX) -->
+    <external-files-path name="external_files" path="." />
+
+    <!-- Cache para archivos temporales -->
+    <cache-path name="cache" path="." />
+
+    <!-- Archivos internos -->
+    <files-path name="internal_files" path="." />
+</paths>

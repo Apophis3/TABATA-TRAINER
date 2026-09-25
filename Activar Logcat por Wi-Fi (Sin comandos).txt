@@ -1,0 +1,79 @@
+. Activar Logcat por Wi-Fi (Sin comandos)
+1.
+En Android Studio, ve a la pestaña superior View  Tool Windows  Device Manager.
+2.
+Verás una pestaña que dice Physical.
+3.
+Haz clic en el icono que parece un código QR o dice Pair Devices Using Wi-Fi.
+4.
+En tu móvil (con el pincho ANT+ quitado y el cable puesto un momento)
+◦
+Ve a Ajustes  Opciones de desarrollador.
+◦
+Activa Depuración inalámbrica (Wireless debugging).
+◦
+Entra ahí y dale a Vincular dispositivo con código QR (o código de vinculación).
+5.
+Escanea el código que sale en el PC.
+6.
+Ya puedes quitar el cable, poner el ANT+ y verás los logs en la pestaña Logcat de Android Studio.
+2. Implementación de la mejora antDeviceNumber en la UI
+Para que puedas ver el ID del sensor directamente en la pantalla de tu móvil (por si falla el Wi-Fi), vamos a modificar el archivo WorkoutScreen.kt.
+He actualizado el MetricsPanel para que el nombre del sensor (ID) se vea bajo la etiqueta HR1.
+Kotlin
+ Modifica tu MetricsPanel en WorkoutScreen.kt
+@Composable
+private fun MetricsPanel(
+    heartRate Int,
+    heartRate2 Int = 0,
+     ... otros parámetros ...
+    isHrConnected Boolean = false,
+    isHr2Connected Boolean = false,
+     Añadimos estas variables para mostrar el nombreID
+    hr1Label String = ANT+, 
+    hr2Label String = BLE
+) {
+    Row(
+         ... tu modifier actual ...
+    ) {
+         HR1 (ANT+) - Aquí aparecerá el ID #12345
+        MetricItem(
+            icon = Icons.Default.Favorite,
+            value = if (isHrConnected  heartRate  0) $heartRate else --,
+            unit = bpm,
+            label = hr1Label,  --- Usamos la etiqueta dinámica
+            isPrimary = true,
+            color = TabataColors.HrPink
+        )
+        
+         ... (otros items Hr1 Máx, C1) ...
+
+         HR2 (BLE)
+        MetricItem(
+            icon = Icons.Default.Favorite,
+            value = if (isHr2Connected  heartRate2  0) $heartRate2 else --,
+            unit = bpm,
+            label = hr2Label,  --- Usamos la etiqueta dinámica
+            isPrimary = true,
+            color = TabataColors.HrCyan
+        )
+        
+         ...
+    }
+}
+Show full code block
+3. Logcat mejorado (Log de Agente)
+Añade estas líneas en tu lógica de conexión para que cuando mires el Logcat (por Wi-Fi) veas esto claramente
+En la parte donde recibes datos de ANT+
+Kotlin
+Log.i(SensorDebug, 🔗 ANT+ CONECTADO - ID DISPOSITIVO #${device.antDeviceNumber})
+En la parte de BLE (BleHeartRateManager)
+Kotlin
+Log.i(SensorDebug, 📱 BLE CONECTADO - Nombre ${gatt.device.name}  MAC ${gatt.device.address})
+Con esto conseguirás
+1.
+Ver en la pantalla del móvil el ID del sensor ANT+.
+2.
+Confirmar si el nombre del BLE coincide con ese ID (confirmando que es dual).
+3.
+Ver los logs en el PC sin cables usando el Pairing Wi-Fi de Android Studio.

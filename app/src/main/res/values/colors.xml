@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#FFFFFF</color>
+    <!-- 👇 AÑADE ESTOS NUEVOS COLORES 👇 -->
+    <color name="app_cool_gray">#FF36454F</color> <!-- Un gris oscuro y frío, similar al 'Charcoal' -->
+    <color name="app_vibrant_orange">#FFFF5F1F</color> <!-- Un naranja muy vibrante y energético -->
+</resources>
