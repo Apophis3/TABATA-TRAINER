@@ -325,6 +325,7 @@ class WorkoutService : Service() {
                             it.copy(
                                 isHrScanning = true,
                                 isHrConnected = false,
+                                hrProtocol = null,
                                 hrErrorMessage = "Buscando..."
                             ) 
                         }
@@ -349,6 +350,7 @@ class WorkoutService : Service() {
                                 isHrConnected = true,
                                 isHrScanning = false,
                                 hrDeviceName = reading.deviceName,
+                                hrProtocol = reading.protocol,
                                 hrErrorMessage = null
                             )
                         }
@@ -357,6 +359,7 @@ class WorkoutService : Service() {
                         _sensorState.update {
                             it.copy(
                                 isHrConnected = false,
+                                hrProtocol = null,
                                 isHrScanning = false,
                                 heartRate = 0
                             )
@@ -385,6 +388,7 @@ class WorkoutService : Service() {
                             it.copy(
                                 isCadenceScanning = true,
                                 isCadenceConnected = false,
+                                cadenceProtocol = null,
                                 cadenceErrorMessage = "Buscando..."
                             ) 
                         }
@@ -409,6 +413,7 @@ class WorkoutService : Service() {
                                 isCadenceConnected = true,
                                 isCadenceScanning = false,
                                 cadenceDeviceName = reading.deviceName,
+                                cadenceProtocol = reading.protocol,
                                 cadenceErrorMessage = null
                             )
                         }
@@ -417,6 +422,7 @@ class WorkoutService : Service() {
                         _sensorState.update {
                             it.copy(
                                 isCadenceConnected = false,
+                                cadenceProtocol = null,
                                 isCadenceScanning = false,
                                 cadence = 0f
                             )
@@ -461,21 +467,25 @@ class WorkoutService : Service() {
         _sensorState.update {
             it.copy(
                 isHrConnected = false,
+                hrProtocol = null,
                 isHrScanning = false,
                 hrDeviceName = null,
                 heartRate = 0,
                 hrErrorMessage = null,
                 isHr2Connected = false,
+                hr2Protocol = null,
                 isHr2Scanning = false,
                 hr2DeviceName = null,
                 heartRate2 = 0,
                 hr2ErrorMessage = null,
                 isCadenceConnected = false,
+                cadenceProtocol = null,
                 isCadenceScanning = false,
                 cadenceDeviceName = null,
                 cadence = 0f,
                 cadenceErrorMessage = null,
                 isCadence2Connected = false,
+                cadence2Protocol = null,
                 isCadence2Scanning = false,
                 cadence2DeviceName = null,
                 cadence2 = 0f,
@@ -674,6 +684,7 @@ class WorkoutService : Service() {
                             it.copy(
                                 isHrScanning = true,
                                 isHrConnected = false,
+                                hrProtocol = null,
                                 hrErrorMessage = "Buscando..."
                             ) 
                         }
@@ -701,6 +712,7 @@ class WorkoutService : Service() {
                                 isHrConnected = true, 
                                 isHrScanning = false,
                                 hrDeviceName = reading.deviceName,
+                                hrProtocol = reading.protocol,
                                 hrErrorMessage = null
                             ) 
                         }
@@ -710,6 +722,7 @@ class WorkoutService : Service() {
                         _sensorState.update { 
                             it.copy(
                                 isHrConnected = false,
+                                hrProtocol = null,
                                 isHrScanning = false,
                                 heartRate = 0
                             ) 
@@ -740,6 +753,7 @@ class WorkoutService : Service() {
                             it.copy(
                                 isHr2Scanning = true,
                                 isHr2Connected = false,
+                                hr2Protocol = null,
                                 hr2ErrorMessage = "Buscando..."
                             ) 
                         }
@@ -767,6 +781,7 @@ class WorkoutService : Service() {
                                 isHr2Connected = true,
                                 isHr2Scanning = false,
                                 hr2DeviceName = reading.deviceName,
+                                hr2Protocol = reading.protocol,
                                 hr2ErrorMessage = null
                             ) 
                         }
@@ -776,6 +791,7 @@ class WorkoutService : Service() {
                         _sensorState.update { 
                             it.copy(
                                 isHr2Connected = false,
+                                hr2Protocol = null,
                                 isHr2Scanning = false,
                                 heartRate2 = 0
                             ) 
@@ -806,6 +822,7 @@ class WorkoutService : Service() {
                             it.copy(
                                 isCadenceScanning = true,
                                 isCadenceConnected = false,
+                                cadenceProtocol = null,
                                 cadenceErrorMessage = "Buscando..."
                             ) 
                         }
@@ -833,6 +850,7 @@ class WorkoutService : Service() {
                                 isCadenceConnected = true, 
                                 isCadenceScanning = false,
                                 cadenceDeviceName = reading.deviceName,
+                                cadenceProtocol = reading.protocol,
                                 cadenceErrorMessage = null
                             ) 
                         }
@@ -842,6 +860,7 @@ class WorkoutService : Service() {
                         _sensorState.update { 
                             it.copy(
                                 isCadenceConnected = false,
+                                cadenceProtocol = null,
                                 isCadenceScanning = false,
                                 cadence = 0f
                             ) 
@@ -872,6 +891,7 @@ class WorkoutService : Service() {
                             it.copy(
                                 isCadence2Scanning = true,
                                 isCadence2Connected = false,
+                                cadence2Protocol = null,
                                 cadence2ErrorMessage = "Buscando..."
                             ) 
                         }
@@ -899,6 +919,7 @@ class WorkoutService : Service() {
                                 isCadence2Connected = true, 
                                 isCadence2Scanning = false,
                                 cadence2DeviceName = reading.deviceName,
+                                cadence2Protocol = reading.protocol,
                                 cadence2ErrorMessage = null
                             ) 
                         }
@@ -908,6 +929,7 @@ class WorkoutService : Service() {
                         _sensorState.update { 
                             it.copy(
                                 isCadence2Connected = false,
+                                cadence2Protocol = null,
                                 isCadence2Scanning = false,
                                 cadence2 = 0f
                             ) 

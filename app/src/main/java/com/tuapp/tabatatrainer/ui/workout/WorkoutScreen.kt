@@ -383,6 +383,7 @@ private fun PortraitWorkoutLayout(
             isHrConnected = sensorState.isHrConnected,
             isHr2Connected = sensorState.isHr2Connected,
             isCadenceConnected = sensorState.isCadenceConnected,
+            protocols = listOf(sensorState.hrProtocol, sensorState.hr2Protocol, sensorState.cadenceProtocol, sensorState.cadence2Protocol),
             isCadence2Connected = sensorState.isCadence2Connected
         )
 
@@ -543,6 +544,7 @@ private fun LandscapeWorkoutLayout(
                 isHrConnected = sensorState.isHrConnected,
                 isHr2Connected = sensorState.isHr2Connected,
                 isCadenceConnected = sensorState.isCadenceConnected,
+                protocols = listOf(sensorState.hrProtocol, sensorState.hr2Protocol, sensorState.cadenceProtocol, sensorState.cadence2Protocol),
                 isCadence2Connected = sensorState.isCadence2Connected
             )
         }
@@ -923,7 +925,8 @@ private fun MetricsPanel(
     isHrConnected: Boolean = false,
     isHr2Connected: Boolean = false,
     isCadenceConnected: Boolean = false,
-    isCadence2Connected: Boolean = false
+    isCadence2Connected: Boolean = false,
+    protocols: List<String?> = listOf(null, null, null, null)   // HR1, HR2, C1, C2
 ) {
     Row(
         modifier = Modifier
@@ -938,7 +941,8 @@ private fun MetricsPanel(
             value = if (isHrConnected || heartRate > 0) "$heartRate" else "--",
             unit = "bpm",
             label = "HR1",
-            isPrimary = true
+            isPrimary = true,
+            protocol = protocols[0]
         )
         // HR1 Máx
         MetricItem(
@@ -953,7 +957,8 @@ private fun MetricsPanel(
             value = if (isCadenceConnected || cadence > 0) "${cadence.toInt()}" else "--",
             unit = "rpm",
             label = "C1",
-            isPrimary = true
+            isPrimary = true,
+            protocol = protocols[2]
         )
         // HR2
         MetricItem(
@@ -962,7 +967,8 @@ private fun MetricsPanel(
             unit = "bpm",
             label = "HR2",
             isPrimary = true,
-            color = TabataColors.HrCyan
+            color = TabataColors.HrCyan,
+            protocol = protocols[1]
         )
         // HR2 Máx
         MetricItem(
@@ -978,7 +984,8 @@ private fun MetricsPanel(
             value = if (isCadence2Connected || cadence2 > 0) "${cadence2.toInt()}" else "--",
             unit = "rpm",
             label = "C2",
-            isPrimary = true
+            isPrimary = true,
+            protocol = protocols[3]
         )
     }
 }
@@ -999,7 +1006,8 @@ private fun MetricsPanelCompact(
     isHrConnected: Boolean = false,
     isHr2Connected: Boolean = false,
     isCadenceConnected: Boolean = false,
-    isCadence2Connected: Boolean = false
+    isCadence2Connected: Boolean = false,
+    protocols: List<String?> = listOf(null, null, null, null)   // HR1, HR2, C1, C2
 ) {
     Column(
         modifier = Modifier
@@ -1014,9 +1022,9 @@ private fun MetricsPanelCompact(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            MetricItemCompact(Icons.Default.Favorite, if (isHrConnected || heartRate > 0) "$heartRate" else "--", "HR1", TabataColors.HrPink)
+            MetricItemCompact(Icons.Default.Favorite, if (isHrConnected || heartRate > 0) "$heartRate" else "--", "HR1", TabataColors.HrPink, protocols[0])
             MetricItemCompact(Icons.AutoMirrored.Filled.TrendingUp, if (maxHeartRate > 0) "$maxHeartRate" else "--", "HR1 Máx", TabataColors.HrPink)
-            MetricItemCompact(Icons.AutoMirrored.Filled.DirectionsBike, if (isCadenceConnected || cadence > 0) "${cadence.toInt()}" else "--", "C1", Color.White)
+            MetricItemCompact(Icons.AutoMirrored.Filled.DirectionsBike, if (isCadenceConnected || cadence > 0) "${cadence.toInt()}" else "--", "C1", Color.White, protocols[2])
         }
         
         Spacer(modifier = Modifier.height(12.dp))
@@ -1027,15 +1035,15 @@ private fun MetricsPanelCompact(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            MetricItemCompact(Icons.Default.Favorite, if (isHr2Connected || heartRate2 > 0) "$heartRate2" else "--", "HR2", TabataColors.HrCyan)
+            MetricItemCompact(Icons.Default.Favorite, if (isHr2Connected || heartRate2 > 0) "$heartRate2" else "--", "HR2", TabataColors.HrCyan, protocols[1])
             MetricItemCompact(Icons.AutoMirrored.Filled.TrendingUp, if (maxHeartRate2 > 0) "$maxHeartRate2" else "--", "HR2 Máx", TabataColors.HrCyan)
-            MetricItemCompact(Icons.AutoMirrored.Filled.DirectionsBike, if (isCadence2Connected || cadence2 > 0) "${cadence2.toInt()}" else "--", "C2", Color.White)
+            MetricItemCompact(Icons.AutoMirrored.Filled.DirectionsBike, if (isCadence2Connected || cadence2 > 0) "${cadence2.toInt()}" else "--", "C2", Color.White, protocols[3])
         }
     }
 }
 
 @Composable
-private fun MetricItem(icon: ImageVector, value: String, unit: String, label: String, isPrimary: Boolean = false, color: Color = Color.White) {
+private fun MetricItem(icon: ImageVector, value: String, unit: String, label: String, isPrimary: Boolean = false, color: Color = Color.White, protocol: String? = null) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(icon, null, tint = color, modifier = Modifier.size(if (isPrimary) 22.dp else 18.dp))
         Row(verticalAlignment = Alignment.Bottom) {
@@ -1053,11 +1061,29 @@ private fun MetricItem(icon: ImageVector, value: String, unit: String, label: St
             )
         }
         Text(label, fontSize = 11.sp, color = color.copy(alpha = 0.6f))
+        ProtocolBadge(protocol)
     }
 }
 
+/** Etiqueta pequeña con el protocolo del sensor: ANT+ en verde, BLE en azul */
 @Composable
-private fun MetricItemCompact(icon: ImageVector, value: String, unit: String, color: Color = Color.White) {
+private fun ProtocolBadge(protocol: String?) {
+    if (protocol == null) return
+    val c = if (protocol.startsWith("ANT")) Color(0xFF66BB6A) else Color(0xFF42A5F5)
+    Text(
+        text = protocol,
+        fontSize = 9.sp,
+        fontWeight = FontWeight.Bold,
+        color = c,
+        modifier = Modifier
+            .padding(top = 2.dp)
+            .background(c.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+            .padding(horizontal = 4.dp, vertical = 1.dp)
+    )
+}
+
+@Composable
+private fun MetricItemCompact(icon: ImageVector, value: String, unit: String, color: Color = Color.White, protocol: String? = null) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(icon, null, tint = color, modifier = Modifier.size(28.dp))
         Spacer(modifier = Modifier.height(4.dp))
@@ -1065,6 +1091,7 @@ private fun MetricItemCompact(icon: ImageVector, value: String, unit: String, co
             Text(value, fontSize = 36.sp, fontWeight = FontWeight.Bold, color = color)
             Text(unit, fontSize = 14.sp, color = color.copy(alpha = 0.7f), modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
         }
+        ProtocolBadge(protocol)
     }
 }
 
@@ -1221,12 +1248,19 @@ private fun HeartRateGraph(
         val height = size.height - labelSpace
         fun yOf(hr: Float) = height - ((hr - minHr) / range * height)
 
-        for (i in 0..5) {
-            val y = height * i / 5
-            drawLine(
-                color = Color.White.copy(alpha = if (i == 0 || i == 5) 0.3f else 0.15f),
-                start = Offset(0f, y), end = Offset(width, y), strokeWidth = 1f
-            )
+        // Líneas de referencia en valores redondos (100, 120, 140...) con su etiqueta
+        val yPaint = android.graphics.Paint().apply {
+            color = android.graphics.Color.argb(150, 255, 255, 255)
+            textSize = 10.sp.toPx()
+            isAntiAlias = true
+        }
+        val yStep = if (range > 120) 40 else 20
+        var ref = ((minHr + yStep - 1) / yStep) * yStep
+        while (ref < maxHr) {
+            val y = yOf(ref.toFloat())
+            drawLine(Color.White.copy(alpha = 0.15f), Offset(0f, y), Offset(width, y), 1f)
+            drawContext.canvas.nativeCanvas.drawText("$ref", 2f, y - 3f, yPaint)
+            ref += yStep
         }
 
         // Marcas de tiempo en el eje X (cada 1/2/5/10/15/30/60 min según duración)

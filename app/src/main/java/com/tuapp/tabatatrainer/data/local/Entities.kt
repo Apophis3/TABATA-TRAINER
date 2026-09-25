@@ -57,6 +57,11 @@ data class SensorState(
     val hr2DeviceName: String? = null,
     val cadenceDeviceName: String? = null,
     val cadence2DeviceName: String? = null,
+    // Protocolo por el que llega cada sensor ("ANT+" / "BLE"), para mostrarlo en pantalla
+    val hrProtocol: String? = null,
+    val hr2Protocol: String? = null,
+    val cadenceProtocol: String? = null,
+    val cadence2Protocol: String? = null,
     val heartRate: Int = 0,
     val heartRate2: Int = 0,
     val cadence: Float = 0f,
