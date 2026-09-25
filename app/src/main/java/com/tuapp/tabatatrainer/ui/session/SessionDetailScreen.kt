@@ -487,6 +487,40 @@ private fun MetricsGrid(
             modifier = Modifier.weight(1f)
         )
     }
+
+    // Tercera fila: podómetro (pasos, zancada media = distancia GPS / pasos, pasos/min)
+    session.totalSteps?.let { steps ->
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            MetricCard(
+                icon = Icons.AutoMirrored.Filled.DirectionsWalk,
+                label = "Pasos",
+                value = steps.toString(),
+                unit = "",
+                color = Color(0xFF8BC34A),
+                modifier = Modifier.weight(1f)
+            )
+            MetricCard(
+                icon = Icons.AutoMirrored.Filled.DirectionsWalk,
+                label = "Zancada",
+                value = session.avgStrideM?.let { String.format("%.2f", it) } ?: "--",
+                unit = "m",
+                color = Color(0xFF8BC34A),
+                modifier = Modifier.weight(1f)
+            )
+            MetricCard(
+                icon = Icons.AutoMirrored.Filled.TrendingUp,
+                label = "Pasos/min",
+                value = session.avgStepCadence?.let { String.format("%.0f", it) } ?: "--",
+                unit = "ppm",
+                color = Color(0xFF8BC34A),
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
 }
 
 @Composable

@@ -14,7 +14,7 @@ import androidx.room.RoomDatabase
         LapEntity::class,           // ← NUEVO: Vueltas/Laps
         DeviceProfileEntity::class  // ← NUEVO: Perfiles de dispositivos
     ],
-    version = 8,                    // ← INCREMENTADO (agregado avgHeartRate2, maxHeartRate2)
+    version = 9,                    // 9: pasos y zancada del podómetro
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

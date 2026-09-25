@@ -12,6 +12,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * - Versión 5: Añadidas tablas poi_points y lap_records
  * - Versión 6: Añadida columna heartRate2 a sensor_readings
  * - Versión 7: Añadida tabla device_profiles para persistencia de sensores
+ * - Versión 9: Añadidos totalSteps, avgStrideM y avgStepCadence a workout_sessions
  */
 object DatabaseMigrations {
 
@@ -156,11 +157,23 @@ object DatabaseMigrations {
     }
 
     /**
+     * Migración de versión 8 a 9: pasos del podómetro en la sesión
+     */
+    val MIGRATION_8_9 = object : Migration(8, 9) {
+        override fun migrate(database: SupportSQLiteDatabase) {
+            database.execSQL("ALTER TABLE workout_sessions ADD COLUMN totalSteps INTEGER")
+            database.execSQL("ALTER TABLE workout_sessions ADD COLUMN avgStrideM REAL")
+            database.execSQL("ALTER TABLE workout_sessions ADD COLUMN avgStepCadence REAL")
+        }
+    }
+
+    /**
      * Lista de todas las migraciones disponibles
      */
     val ALL_MIGRATIONS = arrayOf(
         MIGRATION_4_5,
         MIGRATION_5_6,
-        MIGRATION_6_7
+        MIGRATION_6_7,
+        MIGRATION_8_9
     )
 }

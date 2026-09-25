@@ -146,6 +146,10 @@ data class WorkoutSessionEntity(
     var maxSpeedKmh: Float? = null,
     var elevationGain: Float? = null,
     var gpsEnabled: Boolean = false,
+    // Podómetro del móvil
+    var totalSteps: Int? = null,
+    var avgStrideM: Float? = null,
+    var avgStepCadence: Float? = null,
     // Tipo de actividad
     var activityType: String = "TABATA"
 )

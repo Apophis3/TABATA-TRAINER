@@ -11,6 +11,7 @@ import androidx.core.app.NotificationCompat
 import com.tuapp.tabatatrainer.MainActivity
 import com.tuapp.tabatatrainer.data.local.*
 import com.tuapp.tabatatrainer.sensor.*
+import com.tuapp.tabatatrainer.sensor.StepCounter
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -48,7 +49,11 @@ data class FreeRideStats(
     val currentLapDistanceMeters: Float = 0f,
     val currentLapTimeSeconds: Int = 0,
     val latitude: Double = 0.0,
-    val longitude: Double = 0.0
+    val longitude: Double = 0.0,
+    // Podómetro
+    val steps: Int = 0,
+    val stepCadenceSpm: Int = 0,
+    val avgStrideM: Float = 0f
 )
 
 data class LapData(
@@ -91,6 +96,11 @@ class FreeRideService : Service() {
     @Inject lateinit var sessionDao: SessionDao
     @Inject lateinit var gpsDao: GpsDao
     @Inject lateinit var sensorReadingDao: SensorReadingDao
+    @Inject lateinit var stepCounter: StepCounter
+
+    // Podómetro: último valor bruto visto y pasos de los últimos 10 s (para pasos/min)
+    private var lastRawSteps: Long? = null
+    private val recentStepDeltas = ArrayDeque<Int>()
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val binder = LocalBinder()
@@ -475,6 +485,10 @@ class FreeRideService : Service() {
         gpsManager.resetStats()
         Log.d(TAG, "📍 GPS stats reseteadas")
 
+        stepCounter.start()
+        lastRawSteps = stepCounter.rawSteps.value
+        recentStepDeltas.clear()
+
         serviceScope.launch {
             val session = WorkoutSessionEntity(
                 id = currentSessionId!!,
@@ -500,6 +514,9 @@ class FreeRideService : Service() {
                 avgHeartRate = 0,
                 maxHeartRate = 0,
                 elevationGainM = 0f,
+                steps = 0,
+                stepCadenceSpm = 0,
+                avgStrideM = 0f,
                 lapsCount = 0,
                 currentLapDistanceMeters = 0f,
                 currentLapTimeSeconds = 0
@@ -528,6 +545,8 @@ class FreeRideService : Service() {
 
         _stats.update { it.copy(isPaused = false) }
         gpsManager.resume()
+        lastRawSteps = stepCounter.rawSteps.value  // los pasos dados en pausa no cuentan
+        recentStepDeltas.clear()
         startTimer()
         updateNotification("En Ruta", "Grabando actividad...")
 
@@ -546,6 +565,7 @@ class FreeRideService : Service() {
             onSaved?.let { withContext(Dispatchers.Main) { it() } }
         }
 
+        stepCounter.stop()
         _stats.update { it.copy(isRunning = false, isPaused = false) }
         updateNotification("Ruta Finalizada", "¡Buen trabajo!")
     }
@@ -688,6 +708,7 @@ class FreeRideService : Service() {
                     )
                 }
 
+                updateSteps()
                 saveSensorReading()
 
                 if (_stats.value.totalTimeSeconds % 30 == 0) {
@@ -698,6 +719,30 @@ class FreeRideService : Service() {
             }
         }
     }
+
+    /** Suma los pasos del último segundo y recalcula pasos/min y zancada media */
+    private fun updateSteps() {
+        val raw = stepCounter.rawSteps.value ?: return
+        val delta = lastRawSteps?.let { (raw - it).toInt().coerceAtLeast(0) } ?: 0
+        lastRawSteps = raw
+
+        recentStepDeltas.addLast(delta)
+        while (recentStepDeltas.size > 10) recentStepDeltas.removeFirst()
+        val spm = recentStepDeltas.sum() * 60 / recentStepDeltas.size
+
+        _stats.update {
+            val steps = it.steps + delta
+            it.copy(
+                steps = steps,
+                stepCadenceSpm = spm,
+                avgStrideM = strideOf(it.totalDistanceMeters, steps)
+            )
+        }
+    }
+
+    /** Zancada = distancia GPS / pasos; con pocos pasos el dato no es fiable */
+    private fun strideOf(distanceM: Float, steps: Int): Float =
+        if (steps >= 20 && distanceM > 0f) distanceM / steps else 0f
 
     // ============================================================================
     // PROCESAMIENTO GPS
@@ -874,6 +919,10 @@ class FreeRideService : Service() {
                         avgSpeedKmh = gpsStats.avgSpeedKmh,
                         maxSpeedKmh = gpsStats.maxSpeedKmh,
                         elevationGain = gpsStats.elevationGain,
+                        totalSteps = stats.steps.takeIf { it > 0 },
+                        avgStrideM = strideOf(gpsStats.totalDistanceMeters, stats.steps).takeIf { it > 0f },
+                        avgStepCadence = if (stats.steps > 0 && stats.totalTimeSeconds > 0)
+                            stats.steps * 60f / stats.totalTimeSeconds else null,
                         isCompleted = true
                     )
                 )
@@ -883,6 +932,7 @@ class FreeRideService : Service() {
 
     private fun stopAllTracking() {
         timerJob?.cancel()
+        stepCounter.stop()
         stopSensorCollectors()
     }
 

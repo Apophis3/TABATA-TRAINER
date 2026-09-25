@@ -243,7 +243,29 @@ private fun MetricsPage(
                     modifier = Modifier.weight(1f)
                 )
             }
-            // ⚡ ELIMINADAS: Altitud y Desnivel+ (no deben aparecer)
+            // Podómetro del móvil: solo si hay pasos
+            if (stats.steps > 0) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    LapMetricCardNoIcon(
+                        value = "${stats.steps}",
+                        unit = "pasos",
+                        label = "Pasos",
+                        modifier = Modifier.weight(1f)
+                    )
+                    LapMetricCardNoIcon(
+                        value = if (stats.stepCadenceSpm > 0) "${stats.stepCadenceSpm}" else "--",
+                        unit = "ppm",
+                        label = "Pasos/min",
+                        modifier = Modifier.weight(1f)
+                    )
+                    LapMetricCardNoIcon(
+                        value = if (stats.avgStrideM > 0f) String.format("%.2f", stats.avgStrideM) else "--",
+                        unit = "m",
+                        label = "Zancada",
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(32.dp))
