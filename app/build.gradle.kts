@@ -1,9 +1,28 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
 }
+
+// ── Versionado automático ───────────────────────────────────────────────
+// version.properties guarda MAJOR.MINOR.BUILD; cada assemble/install sube BUILD en 1,
+// así cada APK generado tiene un número único (versionName "1.6.7", versionCode 7).
+val versionFile = rootProject.file("version.properties")
+val versionProps = Properties().apply { versionFile.inputStream().use { load(it) } }
+val isApkBuild = gradle.startParameter.taskNames.any { name ->
+    name.substringAfterLast(':').let { it.startsWith("assemble") || it.startsWith("install") }
+}
+if (isApkBuild) {
+    versionProps["BUILD"] = (versionProps.getProperty("BUILD").toInt() + 1).toString()
+    versionFile.outputStream().use {
+        versionProps.store(it, "Version de la app: MAJOR y MINOR a mano, BUILD sube solo en cada APK")
+    }
+}
+val appVersionCode = versionProps.getProperty("BUILD").toInt()
+val appVersionName = "${versionProps.getProperty("MAJOR")}.${versionProps.getProperty("MINOR")}.$appVersionCode"
 
 android {
     namespace = "com.tuapp.tabatatrainer"
@@ -13,8 +32,8 @@ android {
         applicationId = "com.tuapp.tabatatrainer"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
-        versionName = "1.5-GPS"
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -52,6 +71,18 @@ android {
             excludes += "/META-INF/NOTICE"
         }
     }
+}
+
+// Copia cada APK generado a /apk con la versión en el nombre: TabataTrainer-1.6.7-debug.apk
+listOf("debug", "release").forEach { type ->
+    val cap = type.replaceFirstChar { it.uppercase() }
+    val copyTask = tasks.register<Copy>("copy${cap}ApkWithVersion") {
+        from(layout.buildDirectory.dir("outputs/apk/$type"))
+        include("*.apk")
+        into(rootProject.layout.projectDirectory.dir("apk"))
+        rename { "TabataTrainer-$appVersionName-$type.apk" }
+    }
+    tasks.matching { it.name == "assemble$cap" }.configureEach { finalizedBy(copyTask) }
 }
 
 dependencies {

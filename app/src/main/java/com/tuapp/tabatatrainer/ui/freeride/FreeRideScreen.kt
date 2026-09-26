@@ -243,29 +243,8 @@ private fun MetricsPage(
                     modifier = Modifier.weight(1f)
                 )
             }
-            // Podómetro del móvil: solo si hay pasos
-            if (stats.steps > 0) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    LapMetricCardNoIcon(
-                        value = "${stats.steps}",
-                        unit = "pasos",
-                        label = "Pasos",
-                        modifier = Modifier.weight(1f)
-                    )
-                    LapMetricCardNoIcon(
-                        value = if (stats.stepCadenceSpm > 0) "${stats.stepCadenceSpm}" else "--",
-                        unit = "ppm",
-                        label = "Pasos/min",
-                        modifier = Modifier.weight(1f)
-                    )
-                    LapMetricCardNoIcon(
-                        value = if (stats.avgStrideM > 0f) String.format("%.2f", stats.avgStrideM) else "--",
-                        unit = "m",
-                        label = "Zancada",
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
+            // Podómetro del móvil: solo si hay pasos (franja compacta para que quepa)
+            if (stats.steps > 0) StepsStrip(stats)
         }
 
         Spacer(modifier = Modifier.height(32.dp))
@@ -743,6 +722,33 @@ private fun LapsPage(stats: FreeRideStats, laps: List<LapData>, onLap: () -> Uni
     }
 }
 
+/** Pasos, pasos/min y zancada en una sola tarjeta baja */
+@Composable
+private fun StepsStrip(stats: FreeRideStats) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.3f)),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+            StepsStripItem("${stats.steps}", "", "Pasos", Modifier.weight(1f))
+            StepsStripItem(if (stats.stepCadenceSpm > 0) "${stats.stepCadenceSpm}" else "--", "ppm", "Pasos/min", Modifier.weight(1f))
+            StepsStripItem(if (stats.avgStrideM > 0f) String.format("%.2f", stats.avgStrideM) else "--", "m", "Zancada", Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun StepsStripItem(value: String, unit: String, label: String, modifier: Modifier) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(value, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
+            if (unit.isNotEmpty()) Text(" $unit", fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f))
+        }
+        Text(label, fontSize = 11.sp, color = Color.White.copy(alpha = 0.5f))
+    }
+}
+
 @Composable
 private fun LapMetricCardNoIcon(
     value: String,
@@ -891,6 +897,10 @@ private fun LandscapeMetricsPage(
                     label = "Cadencia",
                     modifier = Modifier.weight(1f)
                 )
+            }
+            if (stats.steps > 0) {
+                Spacer(modifier = Modifier.height(12.dp))
+                StepsStrip(stats)
             }
             // ⚡ ELIMINADAS: Altitud, Desnivel+, avg, laps (no deben aparecer)
         }

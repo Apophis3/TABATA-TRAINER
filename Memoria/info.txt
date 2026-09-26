@@ -1,0 +1,1 @@
+**Incorporar persistencia de memoria automática**: En lugar de depender de la creación manual de prompts o la carga explicita de instrucciones en cada sesión[31], se podría integrar una carpeta de `Memoria` (como en el sistema de Mitjana) para que el agente recuerde de forma autónoma las preferencias de código o correcciones pasadas del desarrollador

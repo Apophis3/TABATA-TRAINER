@@ -271,12 +271,27 @@ private fun HeaderRow(
                 fontWeight = FontWeight.Bold,
                 color = Color.White
             )
+            Text(
+                "v${appVersionName()}",
+                fontSize = 11.sp,
+                color = TextSecondary
+            )
         }
         
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             IconButtonMinimal(Icons.Outlined.History, "Historial", onNavigateToHistory)
             IconButtonMinimal(Icons.Outlined.Settings, "Ajustes", onNavigateToSettings)
         }
+    }
+}
+
+/** versionName del APK instalado (lo pone Gradle desde version.properties) */
+@Composable
+private fun appVersionName(): String {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    return remember {
+        runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }
+            .getOrNull() ?: "?"
     }
 }
 

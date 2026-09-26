@@ -1,0 +1,24 @@
+Para llevar la especificación 001-fix-metrics a su total cumplimiento y completar el desarrollo en tabata-trainer, el flujo de trabajo programático continuaría de la siguiente manera, dividiéndose en tres fases técnicas clave hasta llegar a la validación final: [cite: 397, 401, 403]
+________________________________________
+Fase 1: Completar la Persistencia Relacional (Room Database) [cite: 398, 403]
+•	Qué haríamos:
+o	T1.2 (DeviceSessionMetricsEntity): Implementar la tabla que consolida los valores resumen (HR media/máxima, cadencia y velocidad) por atleta, asegurando que soporte campos nulos (NULL) en caso de que un deportista entrene con sensores incompletos [cite: 401, 403].
+o	T1.3 (SensorTelemetrySeriesEntity): Crear la tabla de series de tiempo de alta frecuencia (1 Hz) para registrar las coordenadas, pulsaciones y revoluciones segundo a segundo, lo que permitirá dibujar curvas continuas en los gráficos [cite: 401, 403].
+o	T1.4 (Transacción Atómica en SessionDao): Escribir la función @Transaction suspend fun insertCompleteSession(...) para garantizar que la sesión grupal, las métricas de los atletas y sus historiales detallados se guarden en un único bloque de persistencia SQLite o se reviertan por completo ante fallos [cite: 398, 403].
+•	Validación de esta fase: Ejecución de pruebas instrumentadas en base de datos (connectedAndroidTest) verificando inserciones concurrentes de múltiples atletas y que el borrado de una sesión remueva en cascada toda su telemetría asociada [cite: 398, 402].
+Fase 2: Motor de Telemetría e Hilos en Background (Foreground Services) [cite: 397, 398, 403]
+•	Qué haríamos:
+o	T2.1 (Aislamiento de Buffers): Crear canales de comunicación concurrentes basados en Kotlin StateFlow o SharedFlow dentro de WorkoutService para procesar de forma aislada e independiente las señales de hasta 8 sensores en paralelo sin generar colisiones en memoria [cite: 403].
+o	T2.2 y T2.3 (Algoritmo de Promedios Reales y $T_{\text{con}}$): Programar la lógica que acumula el tiempo de conexión activa ($T_{\text{con}}$) de cada dispositivo. El sistema pausará el reloj al registrar una desconexión (mayor a 2s) y calculará la media matemática ignorando por completo los baches o ceros de señal caída [cite: 403].
+o	T2.4 (Bucle de Reconexión Acotada): Implementar en el gestor Bluetooth del teléfono un ciclo de búsqueda restringido a la MAC de origen, limitado a un timeout de 5 minutos para preservar la batería [cite: 403].
+o	T2.5 (Filtro GPS): Aplicar un filtro de umbral en FreeRideService para descartar coordenadas de baja precisión (ej. precisión mayor a 20 metros) [cite: 403].
+•	Validación de esta fase: Tests unitarios locales (./gradlew test) alimentando el servicio con datos sintéticos de prueba que contengan pérdidas deliberadas de señal y verificando que el resultado del promedio final sea matemáticamente idéntico al rendimiento del atleta conectado [cite: 398, 403].
+Fase 3: Pantallas Reactivas e Integración de UI (Jetpack Compose) [cite: 403]
+•	Qué haríamos:
+o	T3.1 (Hub de Pre-sesión Secuencial): Diseñar la pantalla de pre-entrenamiento en Compose que guíe al entrenador a encender y comprobar el estado de conexión individual y el protocolo activo (especificando si es BLE o ANT+) de los packs de sensores [cite: 401, 403], bloqueando el flujo si se intenta asociar el mismo sensor a dos atletas concurrentes.
+o	T3.2 y T3.3 (Navegación Multiusuario y Gráficos Dinámicos): Construir una barra de pestañas dinámica en el detalle del Historial con los nombres de los atletas participantes. Al interactuar con el selector, la UI consultará perezosamente la tabla SensorTelemetrySeriesEntity y repintará las gráficas temporales correspondientes de manera aislada [cite: 401, 403].
+•	Validación de esta fase: Pruebas manuales y de emulador confirmando la fluidez de recomposición del renderizado en Jetpack Compose por encima de los 60 FPS estables, asegurando que no existan tirones visuales al saltar entre los datos de cada deportista [cite: 402, 403].
+________________________________________
+Fase de Cierre, Validación Cruzada y Conclusión [cite: 404]
+1.	Auditoría Técnica de Cobertura (RF-1.1 al RF-4.2): Recorreremos uno a uno los requisitos funcionales de la especificación técnica original, comprobando y documentando formalmente qué test automatizado o salida de consola convalida cada comportamiento esperado [cite: 401, 404].
+2.	Ejecución de Suite Completa de Regresión: Lanzaremos la suite de pruebas globales mediante el comando ./gradlew test [cite: 398]. Si todo es correcto (retorno con código de salida 0) [cite: 398], compilaremos el ejecutable de depuración final [cite: 398], cerraremos el archivo de tareas interactivas tasks.md con un progreso del 100% y daremos por concluida de manera exitosa la especificación 001-fix-metrics [cite: 399, 403].
