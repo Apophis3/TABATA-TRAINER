@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "input=$(cat); if printf '%s' \"$input\" | grep -Eiq '(\\./)?gradlew(\\.bat)?|[^a-z]gradle[[:space:]]|adb([[:space:]]+[^[:space:]]+)*[[:space:]]+install([[:space:]]|\")'; then printf '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Bloqueado por politica del proyecto: la compilacion (gradlew/gradle) y el despliegue de la APK (adb install) los hace el usuario manualmente. No ejecutes build ni deploy.\"}}'; fi",
+            "statusMessage": "Comprobando politica de build/deploy..."
+          }
+        ]
+      }
+    ]
+  }
+}
