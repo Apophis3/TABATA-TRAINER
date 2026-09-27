@@ -85,6 +85,7 @@ fun WorkoutScreen(
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val isTablet = configuration.smallestScreenWidthDp >= 600
     BatteryLowWarnings()
 
     var service by remember { mutableStateOf<WorkoutService?>(null) }
@@ -153,6 +154,7 @@ fun WorkoutScreen(
                         sessionStats = sessionStats,
                         gpsEnabled = gpsEnabled,
                         isLandscape = isLandscape,
+                        isTablet = isTablet,
                         onStart = { service?.startWorkout() },
                         onPause = { service?.pauseWorkout() },
                         onResume = { service?.resumeWorkout() },
@@ -194,6 +196,7 @@ fun WorkoutScreen(
                 sessionStats = sessionStats,
                 gpsEnabled = gpsEnabled,
                 isLandscape = isLandscape,
+                isTablet = isTablet,
                 onStart = { service?.startWorkout() },
                 onPause = { service?.pauseWorkout() },
                 onResume = { service?.resumeWorkout() },
@@ -260,6 +263,7 @@ private fun WorkoutMainPage(
     sessionStats: SessionStats,
     gpsEnabled: Boolean,
     isLandscape: Boolean,
+    isTablet: Boolean,
     onStart: () -> Unit,
     onPause: () -> Unit,
     onResume: () -> Unit,
@@ -272,6 +276,7 @@ private fun WorkoutMainPage(
             sensorState = sensorState,
             sessionStats = sessionStats,
             gpsEnabled = gpsEnabled,
+            isTablet = isTablet,
             onStart = onStart,
             onPause = onPause,
             onResume = onResume,
@@ -402,19 +407,27 @@ private fun PortraitWorkoutLayout(
             isCadence2Connected = sensorState.isCadence2Connected
         )
 
-        TotalTimeDisplay(
-            totalSeconds = workoutState.totalElapsedSeconds,
-            isLandscape = false
-        )
+        // Tiempo total + controles en la misma fila (gana espacio para la gráfica)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TotalTimeDisplay(
+                totalSeconds = workoutState.totalElapsedSeconds,
+                isLandscape = true
+            )
 
-        WorkoutControls(
-            workoutState = workoutState,
-            onStart = onStart,
-            onPause = onPause,
-            onResume = onResume,
-            onStop = onStop,
-            isCompact = false
-        )
+            WorkoutControls(
+                workoutState = workoutState,
+                onStart = onStart,
+                onPause = onPause,
+                onResume = onResume,
+                onStop = onStop,
+                isCompact = true,
+                modifier = Modifier.wrapContentWidth()
+            )
+        }
     }
 }
 
@@ -428,70 +441,77 @@ private fun LandscapeWorkoutLayout(
     sensorState: SensorState,
     sessionStats: SessionStats,
     gpsEnabled: Boolean,
+    isTablet: Boolean,
     onStart: () -> Unit,
     onPause: () -> Unit,
     onResume: () -> Unit,
     onStop: () -> Unit,
     onRefreshSensors: () -> Unit
 ) {
-    Row(
+    // Reduce ~20% la altura del bloque inferior solo en móvil (en tablet ya se ve bien)
+    val bottomScale = if (isTablet) 1f else 0.8f
+    Column(
         modifier = Modifier
             .fillMaxSize()
             .systemBarsPadding()
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // === COLUMNA IZQUIERDA (40%) - Timer y controles ===
-        Column(
-            modifier = Modifier
-                .weight(0.4f)
-                .fillMaxHeight(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+        // Barra superior: chips de sensores + refrescar
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                SensorStatusChipsCompact(
-                    sensorState = sensorState,
-                    gpsEnabled = gpsEnabled
-                )
-                if (workoutState.phase == WorkoutPhase.IDLE || workoutState.isRunning) {
-                    Spacer(modifier = Modifier.width(8.dp))
-                    IconButton(
-                        onClick = onRefreshSensors,
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Refresh,
-                            contentDescription = "Refrescar sensores",
-                            tint = Color.White
-                        )
-                    }
+            SensorStatusChips(
+                sensorState = sensorState,
+                gpsEnabled = gpsEnabled
+            )
+            if (workoutState.phase == WorkoutPhase.IDLE || workoutState.isRunning) {
+                Spacer(modifier = Modifier.width(8.dp))
+                IconButton(
+                    onClick = onRefreshSensors,
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = "Refrescar sensores",
+                        tint = Color.White
+                    )
                 }
             }
+        }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            PhaseTitle(phase = workoutState.phase, fontSize = 28)
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            AnimatedTimer(
-                seconds = workoutState.remainingSeconds,
-                isRunning = workoutState.isRunning && !workoutState.isPaused,
-                fontSize = 100
+        // Gráfica HR de fondo con fase + cronómetro + ronda superpuestos.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+        ) {
+            HeartRateGraph(
+                readings = sessionStats.hrReadings,
+                readings2 = sessionStats.hr2Readings,
+                modifier = Modifier.fillMaxSize(),
+                fillArea = true
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
             ) {
+                PhaseTitle(phase = workoutState.phase)
+                Spacer(modifier = Modifier.height(4.dp))
+                AnimatedTimer(
+                    seconds = workoutState.remainingSeconds,
+                    isRunning = workoutState.isRunning && !workoutState.isPaused,
+                    fontSize = 80
+                )
                 if (workoutState.phase.isActive) {
+                    Spacer(modifier = Modifier.height(6.dp))
                     RoundDisplay(
                         currentRound = workoutState.currentRound,
                         totalRounds = workoutState.totalRounds,
@@ -499,46 +519,45 @@ private fun LandscapeWorkoutLayout(
                         compact = true
                     )
                 }
+            }
+        }
 
+        // Fila final: Tiempo Total + Stop/Pausa a la izquierda, métricas a la derecha
+        // (bottomScale reduce solo la altura en móvil; el ancho no se toca)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy((8.dp * bottomScale))
+            ) {
                 TotalTimeDisplay(
                     totalSeconds = workoutState.totalElapsedSeconds,
-                    isLandscape = true
+                    isLandscape = true,
+                    heightScale = bottomScale
+                )
+                WorkoutControls(
+                    workoutState = workoutState,
+                    onStart = onStart,
+                    onPause = onPause,
+                    onResume = onResume,
+                    onStop = onStop,
+                    isCompact = true,
+                    heightScale = bottomScale,
+                    modifier = Modifier.wrapContentWidth()
                 )
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            WorkoutControls(
-                workoutState = workoutState,
-                onStart = onStart,
-                onPause = onPause,
-                onResume = onResume,
-                onStop = onStop,
-                isCompact = true
-            )
-        }
-
-        Spacer(modifier = Modifier.width(12.dp))
-
-        // === COLUMNA DERECHA (60%) - Gráfica y métricas ===
-        Column(
-            modifier = Modifier
-                .weight(0.6f)
-                .fillMaxHeight(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // Gráfica grande - ocupa la mayor parte del espacio
-            HeartRateGraph(
-                readings = sessionStats.hrReadings,
-                readings2 = sessionStats.hr2Readings,
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(0.65f)
+                    .width(1.dp)
+                    .height(64.dp * bottomScale)
+                    .background(Color.White.copy(alpha = 0.2f))
             )
 
-            // Métricas compactas abajo
-            MetricsPanelCompact(
+            MetricsPanel(
                 heartRate = sensorState.heartRate,
                 heartRate2 = sensorState.heartRate2,
                 cadence = sensorState.cadence,
@@ -554,7 +573,9 @@ private fun LandscapeWorkoutLayout(
                 isHr2Connected = sensorState.isHr2Connected,
                 isCadenceConnected = sensorState.isCadenceConnected,
                 protocols = listOf(sensorState.hrProtocol, sensorState.hr2Protocol, sensorState.cadenceProtocol, sensorState.cadence2Protocol),
-                isCadence2Connected = sensorState.isCadence2Connected
+                isCadence2Connected = sensorState.isCadence2Connected,
+                heightScale = bottomScale,
+                modifier = Modifier.weight(1f)
             )
         }
     }
@@ -781,18 +802,18 @@ private fun RoundDisplay(
 }
 
 @Composable
-private fun TotalTimeDisplay(totalSeconds: Int, isLandscape: Boolean) {
+private fun TotalTimeDisplay(totalSeconds: Int, isLandscape: Boolean, heightScale: Float = 1f) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
             text = "Tiempo Total",
-            fontSize = 14.sp,
+            fontSize = (14 * heightScale).sp,
             color = Color.White.copy(alpha = 0.7f),
             fontWeight = FontWeight.Medium
         )
         if (!isLandscape) Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = formatTime(totalSeconds),
-            fontSize = if (isLandscape) 22.sp else 32.sp,
+            fontSize = ((if (isLandscape) 22f else 32f) * heightScale).sp,
             fontWeight = FontWeight.Bold,
             color = Color.White,
             fontFamily = FontFamily.Monospace
@@ -803,7 +824,6 @@ private fun TotalTimeDisplay(totalSeconds: Int, isLandscape: Boolean) {
 @Composable
 private fun SensorStatusChips(sensorState: SensorState, gpsEnabled: Boolean) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -847,26 +867,6 @@ private fun SensorStatusChips(sensorState: SensorState, gpsEnabled: Boolean) {
 }
 
 @Composable
-private fun SensorStatusChipsCompact(sensorState: SensorState, gpsEnabled: Boolean) {
-    Row(
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        SensorChipCompact(Icons.Default.Favorite, sensorState.isHrConnected, sensorState.isHrScanning)
-        Spacer(modifier = Modifier.width(8.dp))
-        SensorChipCompact(Icons.Default.Favorite, sensorState.isHr2Connected, sensorState.isHr2Scanning)
-        Spacer(modifier = Modifier.width(8.dp))
-        SensorChipCompact(Icons.AutoMirrored.Filled.DirectionsBike, sensorState.isCadenceConnected, sensorState.isCadenceScanning)
-        Spacer(modifier = Modifier.width(8.dp))
-        SensorChipCompact(Icons.AutoMirrored.Filled.DirectionsBike, sensorState.isCadence2Connected, sensorState.isCadence2Scanning)
-        if (gpsEnabled) {
-            Spacer(modifier = Modifier.width(8.dp))
-            SensorChipCompact(Icons.Default.LocationOn, sensorState.isGpsTracking, false)
-        }
-    }
-}
-
-@Composable
 private fun SensorChip(icon: ImageVector, label: String, isConnected: Boolean, isScanning: Boolean = false) {
     val dotColor = when {
         isConnected -> TabataColors.Connected
@@ -894,31 +894,6 @@ private fun SensorChip(icon: ImageVector, label: String, isConnected: Boolean, i
 }
 
 @Composable
-private fun SensorChipCompact(icon: ImageVector, isConnected: Boolean, isScanning: Boolean = false) {
-    val dotColor = when {
-        isConnected -> TabataColors.Connected
-        isScanning -> Color(0xFFFFA500)
-        else -> TabataColors.RestRed
-    }
-    
-    Row(
-        modifier = Modifier
-            .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(icon, null, tint = Color.White, modifier = Modifier.size(14.dp))
-        Spacer(modifier = Modifier.width(4.dp))
-        Box(
-            modifier = Modifier
-                .size(6.dp)
-                .clip(CircleShape)
-                .background(dotColor)
-        )
-    }
-}
-
-@Composable
 private fun MetricsPanel(
     heartRate: Int,
     heartRate2: Int = 0,
@@ -935,15 +910,17 @@ private fun MetricsPanel(
     isHr2Connected: Boolean = false,
     isCadenceConnected: Boolean = false,
     isCadence2Connected: Boolean = false,
-    protocols: List<String?> = listOf(null, null, null, null)   // HR1, HR2, C1, C2
+    protocols: List<String?> = listOf(null, null, null, null),   // HR1, HR2, C1, C2
+    heightScale: Float = 1f,
+    modifier: Modifier = Modifier.fillMaxWidth()
 ) {
     val batteries = rememberSensorBatteries()
     // Estrecho (móvil en vertical): 2 filas de 3; ancho: 1 fila de 6 (spec 005 T-05)
+    // heightScale reduce paddings/fuentes solo en el bloque inferior del horizontal en móvil
     BoxWithConstraints(
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = modifier
             .background(Color.Black.copy(alpha = 0.25f), RoundedCornerShape(18.dp))
-            .padding(16.dp)
+            .padding(horizontal = 16.dp, vertical = 16.dp * heightScale)
     ) {
         val hr1: @Composable () -> Unit = {
             // HR1
@@ -953,8 +930,10 @@ private fun MetricsPanel(
                 unit = "bpm",
                 label = "HR1",
                 isPrimary = true,
+                color = TabataColors.HrPink,
                 protocol = protocols[0],
-                battery = batteries[0]
+                battery = batteries[0],
+                heightScale = heightScale
             )
         }
         val hr1Max: @Composable () -> Unit = {
@@ -963,7 +942,9 @@ private fun MetricsPanel(
                 icon = Icons.AutoMirrored.Filled.TrendingUp,
                 value = if (maxHeartRate > 0) "$maxHeartRate" else "--",
                 unit = "bpm",
-                label = "HR1 Máx"
+                label = "HR1 Máx",
+                color = TabataColors.HrPink,
+                heightScale = heightScale
             )
         }
         val c1: @Composable () -> Unit = {
@@ -975,7 +956,8 @@ private fun MetricsPanel(
                 label = "C1",
                 isPrimary = true,
                 protocol = protocols[2],
-                battery = batteries[2]
+                battery = batteries[2],
+                heightScale = heightScale
             )
         }
         val hr2: @Composable () -> Unit = {
@@ -988,7 +970,8 @@ private fun MetricsPanel(
                 isPrimary = true,
                 color = TabataColors.HrCyan,
                 protocol = protocols[1],
-                battery = batteries[1]
+                battery = batteries[1],
+                heightScale = heightScale
             )
         }
         val hr2Max: @Composable () -> Unit = {
@@ -998,7 +981,8 @@ private fun MetricsPanel(
                 value = if (maxHeartRate2 > 0) "$maxHeartRate2" else "--",
                 unit = "bpm",
                 label = "HR2 Máx",
-                color = TabataColors.HrCyan
+                color = TabataColors.HrCyan,
+                heightScale = heightScale
             )
         }
         val c2: @Composable () -> Unit = {
@@ -1010,11 +994,12 @@ private fun MetricsPanel(
                 label = "C2",
                 isPrimary = true,
                 protocol = protocols[3],
-                battery = batteries[3]
+                battery = batteries[3],
+                heightScale = heightScale
             )
         }
         if (maxWidth < 560.dp) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp * heightScale)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { hr1(); hr1Max(); c1() }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { hr2(); hr2Max(); c2() }
             }
@@ -1025,72 +1010,19 @@ private fun MetricsPanel(
 }
 
 @Composable
-private fun MetricsPanelCompact(
-    heartRate: Int,
-    heartRate2: Int = 0,
-    cadence: Float,
-    cadence2: Float = 0f,
-    avgHeartRate: Int,
-    maxHeartRate: Int,
-    avgHeartRate2: Int = 0,
-    maxHeartRate2: Int = 0,
-    gpsEnabled: Boolean,
-    speedKmh: Float,
-    distanceKm: Float,
-    isHrConnected: Boolean = false,
-    isHr2Connected: Boolean = false,
-    isCadenceConnected: Boolean = false,
-    isCadence2Connected: Boolean = false,
-    protocols: List<String?> = listOf(null, null, null, null)   // HR1, HR2, C1, C2
-) {
-    val batteries = rememberSensorBatteries()
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color.Black.copy(alpha = 0.25f), RoundedCornerShape(18.dp))
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        // Primera fila: HR1, HR1 Máx, Cad1
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            MetricItemCompact(Icons.Default.Favorite, if (isHrConnected || heartRate > 0) "$heartRate" else "--", "HR1", TabataColors.HrPink, protocols[0], batteries[0])
-            MetricItemCompact(Icons.AutoMirrored.Filled.TrendingUp, if (maxHeartRate > 0) "$maxHeartRate" else "--", "HR1 Máx", TabataColors.HrPink)
-            MetricItemCompact(Icons.AutoMirrored.Filled.DirectionsBike, if (isCadenceConnected || cadence > 0) "${cadence.toInt()}" else "--", "C1", Color.White, protocols[2], batteries[2])
-        }
-        
-        Spacer(modifier = Modifier.height(6.dp))
-        
-        // Segunda fila: HR2, HR2 Máx, Cad2
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            MetricItemCompact(Icons.Default.Favorite, if (isHr2Connected || heartRate2 > 0) "$heartRate2" else "--", "HR2", TabataColors.HrCyan, protocols[1], batteries[1])
-            MetricItemCompact(Icons.AutoMirrored.Filled.TrendingUp, if (maxHeartRate2 > 0) "$maxHeartRate2" else "--", "HR2 Máx", TabataColors.HrCyan)
-            MetricItemCompact(Icons.AutoMirrored.Filled.DirectionsBike, if (isCadence2Connected || cadence2 > 0) "${cadence2.toInt()}" else "--", "C2", Color.White, protocols[3], batteries[3])
-        }
-    }
-}
-
-@Composable
-private fun MetricItem(icon: ImageVector, value: String, unit: String, label: String, isPrimary: Boolean = false, color: Color = Color.White, protocol: String? = null, battery: SensorBattery? = null) {
+private fun MetricItem(icon: ImageVector, value: String, unit: String, label: String, isPrimary: Boolean = false, color: Color = Color.White, protocol: String? = null, battery: SensorBattery? = null, heightScale: Float = 1f) {
     // Sin icono (ahorra altura, spec 005 T-05): valor grande y debajo una sola fila etiqueta + protocolo + batería
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
                 text = value,
-                fontSize = if (isPrimary) 32.sp else 22.sp,
+                fontSize = ((if (isPrimary) 32f else 22f) * heightScale).sp,
                 fontWeight = FontWeight.Bold,
                 color = color
             )
             Text(
                 text = unit,
-                fontSize = if (isPrimary) 14.sp else 10.sp,
+                fontSize = ((if (isPrimary) 14f else 10f) * heightScale).sp,
                 color = color.copy(alpha = 0.7f),
                 maxLines = 1,
                 softWrap = false,
@@ -1098,7 +1030,7 @@ private fun MetricItem(icon: ImageVector, value: String, unit: String, label: St
             )
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(label, fontSize = 11.sp, color = color.copy(alpha = 0.6f), maxLines = 1)
+            Text(label, fontSize = (11f * heightScale).sp, color = color.copy(alpha = 0.6f), maxLines = 1)
             ProtocolBadge(protocol)
         }
         BatteryBadge(battery, modifier = Modifier.padding(top = 2.dp))
@@ -1122,36 +1054,23 @@ private fun ProtocolBadge(protocol: String?) {
 }
 
 @Composable
-private fun MetricItemCompact(icon: ImageVector, value: String, unit: String, color: Color = Color.White, protocol: String? = null, battery: SensorBattery? = null) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(value, fontSize = 30.sp, fontWeight = FontWeight.Bold, color = color)
-            Text(unit, fontSize = 13.sp, color = color.copy(alpha = 0.7f), maxLines = 1, softWrap = false, modifier = Modifier.padding(start = 4.dp, bottom = 5.dp))
-        }
-        // En horizontal sobra ancho y falta alto: protocolo y batería en la misma fila para dejar sitio a la gráfica
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            ProtocolBadge(protocol)
-            BatteryBadge(battery)
-        }
-    }
-}
-
-@Composable
 private fun WorkoutControls(
     workoutState: WorkoutState,
     onStart: () -> Unit,
     onPause: () -> Unit,
     onResume: () -> Unit,
     onStop: () -> Unit,
-    isCompact: Boolean
+    isCompact: Boolean,
+    heightScale: Float = 1f,
+    modifier: Modifier = Modifier.fillMaxWidth()
 ) {
-    val mainSize = if (isCompact) 56.dp else 72.dp
-    val secondarySize = if (isCompact) 48.dp else 60.dp
-    val iconSize = if (isCompact) 28.dp else 36.dp
-    val secondaryIconSize = if (isCompact) 24.dp else 28.dp
+    val mainSize = (if (isCompact) 56.dp else 72.dp) * heightScale
+    val secondarySize = (if (isCompact) 48.dp else 60.dp) * heightScale
+    val iconSize = (if (isCompact) 28.dp else 36.dp) * heightScale
+    val secondaryIconSize = (if (isCompact) 24.dp else 28.dp) * heightScale
 
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier,
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
