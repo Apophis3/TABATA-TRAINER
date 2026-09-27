@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
@@ -307,9 +308,11 @@ private fun PortraitWorkoutLayout(
         modifier = Modifier
             .fillMaxSize()
             .systemBarsPadding()
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        // Barra superior: chips de sensores + refrescar
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.Center,
@@ -334,40 +337,47 @@ private fun PortraitWorkoutLayout(
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        PhaseTitle(phase = workoutState.phase)
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        AnimatedTimer(
-            seconds = workoutState.remainingSeconds,
-            isRunning = workoutState.isRunning && !workoutState.isPaused,
-            fontSize = 100
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        if (workoutState.phase.isActive) {
-            RoundDisplay(
-                currentRound = workoutState.currentRound,
-                totalRounds = workoutState.totalRounds,
-                showDots = true
-            )
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        HeartRateGraph(
-            readings = sessionStats.hrReadings,
-            readings2 = sessionStats.hr2Readings,
+        // Gráfica HR de fondo con fase + cronómetro + ronda superpuestos.
+        // Ocupa el espacio flexible => al menos la mitad de la pantalla.
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(100.dp)
-        )
+                .weight(1f)
+        ) {
+            HeartRateGraph(
+                readings = sessionStats.hrReadings,
+                readings2 = sessionStats.hr2Readings,
+                modifier = Modifier.fillMaxSize(),
+                fillArea = true
+            )
 
-        Spacer(modifier = Modifier.height(12.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                PhaseTitle(phase = workoutState.phase)
+                Spacer(modifier = Modifier.height(4.dp))
+                AnimatedTimer(
+                    seconds = workoutState.remainingSeconds,
+                    isRunning = workoutState.isRunning && !workoutState.isPaused,
+                    fontSize = 96
+                )
+                if (workoutState.phase.isActive) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    RoundDisplay(
+                        currentRound = workoutState.currentRound,
+                        totalRounds = workoutState.totalRounds,
+                        showDots = false,
+                        compact = true
+                    )
+                }
+            }
+        }
 
+        // Panel de métricas (todos los sensores)
         MetricsPanel(
             heartRate = sensorState.heartRate,
             heartRate2 = sensorState.heartRate2,
@@ -387,14 +397,10 @@ private fun PortraitWorkoutLayout(
             isCadence2Connected = sensorState.isCadence2Connected
         )
 
-        Spacer(modifier = Modifier.height(12.dp))
-
         TotalTimeDisplay(
             totalSeconds = workoutState.totalElapsedSeconds,
             isLandscape = false
         )
-
-        Spacer(modifier = Modifier.weight(1f))
 
         WorkoutControls(
             workoutState = workoutState,
@@ -404,8 +410,6 @@ private fun PortraitWorkoutLayout(
             onStop = onStop,
             isCompact = false
         )
-
-        Spacer(modifier = Modifier.height(16.dp))
     }
 }
 
@@ -1219,7 +1223,8 @@ private fun GpsMetricCardSmall(
 private fun HeartRateGraph(
     readings: List<Int>,
     readings2: List<Int> = emptyList(),
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    fillArea: Boolean = false
 ) {
     // Cada lista tiene 1 muestra por segundo de entrenamiento (0 = sin dato)
     if (readings.none { it > 0 } && readings2.none { it > 0 }) {
@@ -1240,7 +1245,7 @@ private fun HeartRateGraph(
 
     Canvas(
         modifier = modifier
-            .background(Color.Black.copy(alpha = 0.25f), RoundedCornerShape(18.dp))
+            .background(Color.Black.copy(alpha = if (fillArea) 0.12f else 0.25f), RoundedCornerShape(18.dp))
             .padding(16.dp)
     ) {
         val labelSpace = 14.dp.toPx()
@@ -1288,7 +1293,12 @@ private fun HeartRateGraph(
             val buckets = (width / 2f).toInt().coerceAtLeast(1)
             val perBucket = (totalSeconds.toFloat() / buckets).coerceAtLeast(1f)
             val path = Path()
+            val fill = Path()
+            val bridge = Path()   // tramos de reconexión tras perder señal (línea punteada)
             var started = false
+            var inGap = false     // veníamos de un hueco sin datos
+            var prevX = 0f
+            var prevY = 0f
             var b = 0
             while (b * perBucket < data.size) {
                 val from = (b * perBucket).toInt()
@@ -1302,12 +1312,41 @@ private fun HeartRateGraph(
                 if (n > 0) {
                     if (hi > lo) drawLine(color.copy(alpha = 0.35f), Offset(x, yOf(hi.toFloat())), Offset(x, yOf(lo.toFloat())), 2f)
                     val y = yOf(sum.toFloat() / n)
-                    if (started) path.lineTo(x, y) else { path.moveTo(x, y); started = true }
+                    when {
+                        !started -> { path.moveTo(x, y); fill.moveTo(x, height); fill.lineTo(x, y); started = true }
+                        inGap -> {
+                            // puente punteado desde el último punto válido a la reconexión
+                            bridge.moveTo(prevX, prevY); bridge.lineTo(x, y)
+                            path.moveTo(x, y)   // reanudar el trazo sólido sin recta normal
+                            fill.lineTo(x, y)   // relleno continuo bajo el puente
+                        }
+                        else -> { path.lineTo(x, y); fill.lineTo(x, y) }
+                    }
+                    prevX = x; prevY = y; inGap = false
                 } else {
-                    started = false // hueco sin datos: cortar la línea
+                    if (started) inGap = true // hueco sin datos: se puenteará al reconectar
                 }
                 b++
             }
+            if (started) { fill.lineTo(prevX, height); fill.close() }
+
+            // Relleno degradado bajo la línea (solo cuando la gráfica actúa de fondo)
+            if (fillArea) {
+                drawPath(
+                    path = fill,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(color.copy(alpha = 0.45f), color.copy(alpha = 0.03f)),
+                        startY = 0f,
+                        endY = height
+                    )
+                )
+            }
+            // Puente punteado y atenuado en los tramos de pérdida de señal
+            drawPath(
+                path = bridge,
+                color = color.copy(alpha = 0.5f),
+                style = Stroke(width = 4f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f)))
+            )
             drawPath(path = path, color = color, style = Stroke(width = 4f))
 
             val last = data.indexOfLast { it > 0 }

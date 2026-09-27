@@ -245,7 +245,7 @@ fun ConfigScreen(
                         title = "Calentamiento",
                         value = warmupTime,
                         onValueChange = { warmupTime = it; onManualChange() },
-                        valueRange = 0..60,
+                        valueRange = 0..1200,
                         icon = Icons.Default.Timer,
                         color = TabataColors.WarmupOrange
                     )
@@ -253,7 +253,7 @@ fun ConfigScreen(
                         title = "Trabajo",
                         value = workTime,
                         onValueChange = { workTime = it; onManualChange() },
-                        valueRange = 5..360,
+                        valueRange = 5..1200,
                         icon = Icons.Default.FitnessCenter,
                         color = TabataColors.WorkGreen
                     )
@@ -261,7 +261,7 @@ fun ConfigScreen(
                         title = "Descanso",
                         value = restTime,
                         onValueChange = { restTime = it; onManualChange() },
-                        valueRange = 5..420,
+                        valueRange = 5..1200,
                         icon = Icons.Default.Pause,
                         color = TabataColors.RestRed
                     )
@@ -369,7 +369,7 @@ fun ConfigScreen(
                     title = "Calentamiento",
                     value = warmupTime,
                     onValueChange = { warmupTime = it; onManualChange() },
-                    valueRange = 0..60,
+                    valueRange = 0..1200,
                     icon = Icons.Default.Timer,
                     color = TabataColors.WarmupOrange
                 )
@@ -377,7 +377,7 @@ fun ConfigScreen(
                     title = "Trabajo",
                     value = workTime,
                     onValueChange = { workTime = it; onManualChange() },
-                    valueRange = 5..300,
+                    valueRange = 5..1200,
                     icon = Icons.Default.FitnessCenter,
                     color = TabataColors.WorkGreen
                 )
@@ -385,7 +385,7 @@ fun ConfigScreen(
                     title = "Descanso",
                     value = restTime,
                     onValueChange = { restTime = it; onManualChange() },
-                    valueRange = 5..420,
+                    valueRange = 5..1200,
                     icon = Icons.Default.Pause,
                     color = TabataColors.RestRed
                 )

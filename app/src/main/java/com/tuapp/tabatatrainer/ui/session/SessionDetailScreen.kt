@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -731,56 +732,60 @@ private fun HeartRateChart(
                     .fillMaxWidth()
                     .height(200.dp)
             ) {
+                val dashEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f))
+
                 // Dibujar HR1 - desde inicio de sesión, 0 hasta primer dato válido
                 val path1 = Path()
+                val bridge1 = Path()   // reconexiones tras pérdida de señal (punteado)
                 var path1Started = false
-                
+                var inGap1 = false
+                var lastX1 = 0f; var lastY1 = 0f
+
                 allReadingsWithTime.forEach { (timestamp, hr1, _) ->
-                    val normalizedTime = ((timestamp - sessionStartTime).toFloat() / totalTimeRange) * size.width
-                    // Si hay HR1 válido y el timestamp es >= al primer válido, usar el valor real, sino 0
-                    val hrValue = if (hr1FirstValidTime != null && timestamp >= hr1FirstValidTime) hr1 else 0
-                    val y = size.height - ((hrValue - minHr).toFloat() / hrRange * size.height).coerceIn(0f, size.height)
-                    
-                    if (!path1Started) {
-                        path1.moveTo(normalizedTime, y)
-                        path1Started = true
-                    } else {
-                        path1.lineTo(normalizedTime, y)
+                    if (hr1 <= 0 || hr1FirstValidTime == null || timestamp < hr1FirstValidTime) {
+                        if (path1Started) inGap1 = true // hueco tras datos: se puenteará al reconectar
+                        return@forEach
                     }
+                    val normalizedTime = ((timestamp - sessionStartTime).toFloat() / totalTimeRange) * size.width
+                    val y = size.height - ((hr1 - minHr).toFloat() / hrRange * size.height).coerceIn(0f, size.height)
+                    when {
+                        !path1Started -> { path1.moveTo(normalizedTime, y); path1Started = true }
+                        inGap1 -> { bridge1.moveTo(lastX1, lastY1); bridge1.lineTo(normalizedTime, y); path1.moveTo(normalizedTime, y) }
+                        else -> path1.lineTo(normalizedTime, y)
+                    }
+                    lastX1 = normalizedTime; lastY1 = y; inGap1 = false
                 }
-                
+
                 if (path1Started) {
-                    drawPath(
-                        path = path1,
-                        color = Color(0xFFE91E63),
-                        style = Stroke(width = 3f)
-                    )
+                    drawPath(path = bridge1, color = Color(0xFFE91E63).copy(alpha = 0.5f), style = Stroke(width = 3f, pathEffect = dashEffect))
+                    drawPath(path = path1, color = Color(0xFFE91E63), style = Stroke(width = 3f))
                 }
 
                 // Dibujar HR2 - desde inicio de sesión, 0 hasta primer dato válido
                 val path2 = Path()
+                val bridge2 = Path()
                 var path2Started = false
-                
+                var inGap2 = false
+                var lastX2 = 0f; var lastY2 = 0f
+
                 allReadingsWithTime.forEach { (timestamp, _, hr2) ->
-                    val normalizedTime = ((timestamp - sessionStartTime).toFloat() / totalTimeRange) * size.width
-                    // Si hay HR2 válido y el timestamp es >= al primer válido, usar el valor real, sino 0
-                    val hrValue = if (hr2FirstValidTime != null && timestamp >= hr2FirstValidTime) hr2 else 0
-                    val y = size.height - ((hrValue - minHr).toFloat() / hrRange * size.height).coerceIn(0f, size.height)
-                    
-                    if (!path2Started) {
-                        path2.moveTo(normalizedTime, y)
-                        path2Started = true
-                    } else {
-                        path2.lineTo(normalizedTime, y)
+                    if (hr2 <= 0 || hr2FirstValidTime == null || timestamp < hr2FirstValidTime) {
+                        if (path2Started) inGap2 = true // hueco tras datos: se puenteará al reconectar
+                        return@forEach
                     }
+                    val normalizedTime = ((timestamp - sessionStartTime).toFloat() / totalTimeRange) * size.width
+                    val y = size.height - ((hr2 - minHr).toFloat() / hrRange * size.height).coerceIn(0f, size.height)
+                    when {
+                        !path2Started -> { path2.moveTo(normalizedTime, y); path2Started = true }
+                        inGap2 -> { bridge2.moveTo(lastX2, lastY2); bridge2.lineTo(normalizedTime, y); path2.moveTo(normalizedTime, y) }
+                        else -> path2.lineTo(normalizedTime, y)
+                    }
+                    lastX2 = normalizedTime; lastY2 = y; inGap2 = false
                 }
-                
+
                 if (path2Started) {
-                    drawPath(
-                        path = path2,
-                        color = Color(0xFF00BCD4),
-                        style = Stroke(width = 3f)
-                    )
+                    drawPath(path = bridge2, color = Color(0xFF00BCD4).copy(alpha = 0.5f), style = Stroke(width = 3f, pathEffect = dashEffect))
+                    drawPath(path = path2, color = Color(0xFF00BCD4), style = Stroke(width = 3f))
                 }
             }
         }

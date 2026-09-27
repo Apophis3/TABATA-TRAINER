@@ -280,10 +280,22 @@ fun CompactTimeSlider(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Botones izquierda: -1 y -5
+                // Botones izquierda: -10, -5 y -1
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    // Botón -10
+                    IconButton(
+                        onClick = { adjustValue(-10) },
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Text(
+                            text = "-10",
+                            color = color,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                     // Botón -5
                     IconButton(
                         onClick = { adjustValue(-5) },
@@ -327,7 +339,7 @@ fun CompactTimeSlider(
                     )
                 }
 
-                // Botones derecha: +1 y +5
+                // Botones derecha: +1, +5 y +10
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
@@ -350,6 +362,18 @@ fun CompactTimeSlider(
                     ) {
                         Text(
                             text = "+5",
+                            color = color,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    // Botón +10
+                    IconButton(
+                        onClick = { adjustValue(10) },
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Text(
+                            text = "+10",
                             color = color,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
