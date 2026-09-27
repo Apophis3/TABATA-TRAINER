@@ -59,3 +59,13 @@ calcadas). Trabajo sobre `sensor/HeartRateHub.kt` (Fase C, gestor único de HR).
   Arreglo: búsqueda ANT+ por ventanas (15 s busca / 15 s pausa), se cierra antes de
   conectar, recuperación de aparatos perdidos volviendo a buscar; vigilante BLE de 20 s
   que cierra la conexión colgada para que el escaneo la reenganche.
+
+## Sesión 2026-09-27 — Spec 004: Home responsive
+- `HomeScreen.kt` rehecho con `BoxWithConstraints`: 4 layouts (móvil/tablet × vertical/horizontal).
+  Arreglado: la tablet en vertical usaba el layout horizontal (`screenWidthDp > 600`).
+- Vertical: las tarjetas reparten el alto (sin huecos); scroll si alto < 620dp.
+  Horizontal: panel lateral + tarjetas lado a lado a todo el alto.
+- Pendiente (T-02): compilar e instalar (usuario) y validar en S22+ y Tab S9.
+- Revisión 2: actividades en la misma fila; fila 2 = Última actividad (datos reales) +
+  Esta semana (desde lunes: sesiones, tiempo, km, FC media); fila 3 = Historial | Perfil | Cerrar.
+  Nuevo `HomeViewModel` (solo lectura de `SessionDao.getAllSessions()`) + `HomeSummaryTest`.
