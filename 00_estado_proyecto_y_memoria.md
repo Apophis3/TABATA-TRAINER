@@ -69,3 +69,11 @@ calcadas). Trabajo sobre `sensor/HeartRateHub.kt` (Fase C, gestor único de HR).
 - Revisión 2: actividades en la misma fila; fila 2 = Última actividad (datos reales) +
   Esta semana (desde lunes: sesiones, tiempo, km, FC media); fila 3 = Historial | Perfil | Cerrar.
   Nuevo `HomeViewModel` (solo lectura de `SessionDao.getAllSessions()`) + `HomeSummaryTest`.
+
+## Sesión 2026-09-27 — Spec 005: batería de sensores
+- `SensorBattery` (+test), batería BLE HR en `HeartRateHub` (validado XOSS 75 %, Decathlon 100 %),
+  arranque automático del escaneo BLE al encender Bluetooth, ANT+ HR usa la batería del gemelo BLE.
+- Cadencia BLE/ANT+ en `SensorManager` (T-04, pendiente de validar en el otro estudio).
+- UI (T-05): `BatteryBadge` en Home (2 filas HR1+C1 / HR2+C2), Tabata y Ruta Libre, aviso único de batería baja.
+  Tabata vertical validado; horizontal compactado para dar alto a la gráfica (pendiente de validar).
+- Todo integrado en `main`; ramas eliminadas.

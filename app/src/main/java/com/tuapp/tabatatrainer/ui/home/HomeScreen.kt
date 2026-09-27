@@ -33,6 +33,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.tuapp.tabatatrainer.ui.config.BleScanStatus
+import com.tuapp.tabatatrainer.sensor.SensorBattery
+import com.tuapp.tabatatrainer.ui.components.BatteryBadge
+import com.tuapp.tabatatrainer.ui.components.rememberSensorBatteries
 import com.tuapp.tabatatrainer.ui.config.ConfigViewModel
 import android.app.Activity
 import android.content.Intent
@@ -273,6 +276,7 @@ private fun SensorBar(
     bleStatus: BleScanStatus,
     onRefresh: () -> Unit
 ) {
+    val batteries = rememberSensorBatteries()
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -281,11 +285,20 @@ private fun SensorBar(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-            SensorDot("HR", bleStatus.hrConnected, HeartPink)
-            SensorDot("CAD", bleStatus.cadenceConnected, StatsBlue)
-            SensorDot("GPS", bleStatus.gpsAvailable, FreeRideGreen)
+        // HR1 / C1 arriba, HR2 / C2 abajo, cada uno con su batería (spec 005 T-05)
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically) {
+                SensorWithBattery("HR1", bleStatus.hrConnected, HeartPink, batteries[0])
+                SensorWithBattery("C1", bleStatus.cadenceConnected, StatsBlue, batteries[2])
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically) {
+                // Sin flujo propio de HR2/C2 en la Home: se marca conectado si ya hay dato de batería
+                SensorWithBattery("HR2", batteries[1] != null, HeartPink, batteries[1])
+                SensorWithBattery("C2", batteries[3] != null, StatsBlue, batteries[3])
+            }
         }
+
+        SensorDot("GPS", bleStatus.gpsAvailable, FreeRideGreen)
 
         IconButton(onClick = onRefresh, modifier = Modifier.size(36.dp)) {
             Icon(
@@ -295,6 +308,18 @@ private fun SensorBar(
                 modifier = Modifier.size(20.dp)
             )
         }
+    }
+}
+
+@Composable
+private fun SensorWithBattery(label: String, connected: Boolean, color: Color, battery: SensorBattery?) {
+    Row(
+        modifier = Modifier.widthIn(min = 96.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        SensorDot(label, connected, color)
+        BatteryBadge(battery, fontSize = 11.sp)
     }
 }
 

@@ -38,7 +38,8 @@ data class HrDevice(
     val protocol: String,        // "ANT+" o "BLE"
     val bpm: Int = 0,
     val lastUpdateMs: Long = 0L,
-    val connected: Boolean = false
+    val connected: Boolean = false,
+    val battery: SensorBattery? = null   // spec 005: null = sin dato
 ) {
     fun isFresh(now: Long = System.currentTimeMillis()) = connected && bpm > 0 && now - lastUpdateMs < HeartRateHub.STALE_MS
 }
@@ -72,6 +73,8 @@ class HeartRateHub @Inject constructor(
         private val HR_SERVICE = UUID.fromString("0000180D-0000-1000-8000-00805f9b34fb")
         private val HR_MEASUREMENT = UUID.fromString("00002A37-0000-1000-8000-00805f9b34fb")
         private val CCC_DESCRIPTOR = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+        private val BATTERY_SERVICE = UUID.fromString("0000180F-0000-1000-8000-00805f9b34fb")
+        private val BATTERY_LEVEL = UUID.fromString("00002A19-0000-1000-8000-00805f9b34fb")
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -97,6 +100,11 @@ class HeartRateHub @Inject constructor(
 
     fun slotFlow(slot: Int): Flow<HeartRateReading> = slotFlows[slot]
 
+    // Batería del dispositivo que alimenta cada hueco ahora (spec 005, RF-4)
+    private val slotBatteries = List(SLOTS) { MutableStateFlow<SensorBattery?>(null) }
+
+    fun slotBattery(slot: Int): StateFlow<SensorBattery?> = slotBatteries[slot].asStateFlow()
+
     init {
         // Arranca cuando alguien observa HR1/HR2 y se para 5 s después de que nadie lo haga
         scope.launch {
@@ -118,7 +126,12 @@ class HeartRateHub @Inject constructor(
         startAnt()
         startBle()
         tickJob = scope.launch {
-            while (isActive) { tick(); delay(1_000) }
+            var n = 0
+            while (isActive) {
+                tick()
+                if (++n % 5 == 0) ensureBle()
+                delay(1_000)
+            }
         }
     }
 
@@ -134,6 +147,7 @@ class HeartRateHub @Inject constructor(
         // El registro persistente NO se borra: los vínculos ANT+ ↔ BLE sobreviven entre sesiones
         sessionTwins.clear(); history.clear(); quarantineSince.clear()
         for (i in 0 until SLOTS) { slotGroup[i] = null; slotSource[i] = null; slotLastBpm[i] = 0 }
+        slotBatteries.forEach { it.value = null }
         slotFlows.forEach { it.resetReplayCache() }
     }
 
@@ -149,6 +163,13 @@ class HeartRateHub @Inject constructor(
 
     private fun upsert(id: String, f: (HrDevice?) -> HrDevice) {
         _devices.update { it + (id to f(it[id])) }
+    }
+
+    /** Solo actualiza un dispositivo ya conocido (la batería nunca crea ni conecta nada, RF-7) */
+    private fun onBattery(id: String, battery: SensorBattery?) {
+        if (!running || battery == null) return
+        _devices.update { m -> m[id]?.let { m + (id to it.copy(battery = battery)) } ?: m }
+        Timber.d("🔋 $id: ${battery.percent?.let { "$it %" } ?: battery.level}")
     }
 
     private fun onBpm(id: String, bpm: Int) {
@@ -208,6 +229,8 @@ class HeartRateHub @Inject constructor(
             val newSource = best?.id
             val changed = newSource != slotSource[i]
             slotSource[i] = newSource
+            // ANT+ HR no da batería (SDK 3.9): se usa la del gemelo BLE de la misma banda (spec 005, T-03)
+            slotBatteries[i].value = best?.battery ?: members.firstNotNullOfOrNull { it.battery }
             if (best != null && best.bpm > 0) slotLastBpm[i] = best.bpm
             val out = slotFlows[i]
             if (best == null) {
@@ -432,11 +455,21 @@ class HeartRateHub @Inject constructor(
     private val gatts = ConcurrentHashMap<String, BluetoothGatt>()
     private val bleNames = ConcurrentHashMap<String, String>()
     private var scanCallback: ScanCallback? = null
+    private var bleUnavailableLogged = false
+
+    /** Arranca el escaneo si el Bluetooth se enciende con el hub ya en marcha (antes había que pulsar actualizar) */
+    private fun ensureBle() {
+        if (!running) return
+        val enabled = bluetoothAdapter?.isEnabled == true
+        if (scanCallback != null && !enabled) { scanCallback = null; Timber.w("💓 BLE: Bluetooth apagado") }
+        if (scanCallback == null && enabled) startBle()
+    }
 
     @SuppressLint("MissingPermission")
     private fun startBle() {
         val scanner = bluetoothAdapter?.takeIf { it.isEnabled }?.bluetoothLeScanner ?: run {
-            Timber.w("💓 BLE: no disponible")
+            if (!bleUnavailableLogged) Timber.w("💓 BLE: no disponible")
+            bleUnavailableLogged = true
             return
         }
         val cb = object : ScanCallback() {
@@ -458,6 +491,7 @@ class HeartRateHub @Inject constructor(
             val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_BALANCED).build()
             scanner.startScan(listOf(filter), settings, cb)
             scanCallback = cb
+            bleUnavailableLogged = false
             Timber.d("💓 BLE: escaneo iniciado")
         } catch (e: SecurityException) {
             Timber.e(e, "💓 BLE: sin permiso de escaneo")
@@ -504,14 +538,54 @@ class HeartRateHub @Inject constructor(
                 Timber.d("💓 BLE $name: conectado")
             }
 
+            // Cola GATT: una operación cada vez. Tras activar las notificaciones de HR se lee la
+            // batería; tras leerla se activan sus notificaciones (si el aparato las admite).
+            override fun onDescriptorWrite(g: BluetoothGatt, desc: BluetoothGattDescriptor, status: Int) {
+                if (desc.characteristic.uuid != HR_MEASUREMENT) return
+                val bat = g.getService(BATTERY_SERVICE)?.getCharacteristic(BATTERY_LEVEL) ?: run {
+                    Timber.d("🔋 BLE $name: sin servicio de batería"); return
+                }
+                try {
+                    if (!g.readCharacteristic(bat)) Timber.w("🔋 BLE $name: lectura de batería rechazada")
+                } catch (e: SecurityException) {
+                    Timber.w(e, "🔋 BLE $name: sin permiso para leer batería")
+                }
+            }
+
+            override fun onCharacteristicRead(g: BluetoothGatt, ch: BluetoothGattCharacteristic, value: ByteArray, status: Int) {
+                onBatteryRead(g, ch, value, status)
+            }
+
+            @Deprecated("API < 33")
+            @Suppress("DEPRECATION")
+            override fun onCharacteristicRead(g: BluetoothGatt, ch: BluetoothGattCharacteristic, status: Int) {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) onBatteryRead(g, ch, ch.value, status)
+            }
+
+            private fun onBatteryRead(g: BluetoothGatt, ch: BluetoothGattCharacteristic, value: ByteArray?, status: Int) {
+                if (ch.uuid != BATTERY_LEVEL) return
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    Timber.w("🔋 BLE $name: lectura de batería falló ($status)"); return
+                }
+                onBattery(id, SensorBattery.parseBleBatteryLevel(value))
+                if (ch.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0) enableNotify(g, ch)
+            }
+
             override fun onCharacteristicChanged(g: BluetoothGatt, ch: BluetoothGattCharacteristic, value: ByteArray) {
-                onBpm(id, parseHr(value))
+                onNotification(ch, value)
             }
 
             @Deprecated("API < 33")
             @Suppress("DEPRECATION")
             override fun onCharacteristicChanged(g: BluetoothGatt, ch: BluetoothGattCharacteristic) {
-                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) onBpm(id, parseHr(ch.value ?: return))
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) onNotification(ch, ch.value ?: return)
+            }
+
+            private fun onNotification(ch: BluetoothGattCharacteristic, value: ByteArray) {
+                when (ch.uuid) {
+                    BATTERY_LEVEL -> onBattery(id, SensorBattery.parseBleBatteryLevel(value))
+                    else -> onBpm(id, parseHr(value))
+                }
             }
         }
         try {
@@ -532,6 +606,24 @@ class HeartRateHub @Inject constructor(
             }
         } catch (e: SecurityException) {
             Timber.e(e, "💓 BLE: sin permiso de conexión")
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun enableNotify(g: BluetoothGatt, ch: BluetoothGattCharacteristic) {
+        try {
+            g.setCharacteristicNotification(ch, true)
+            val desc = ch.getDescriptor(CCC_DESCRIPTOR) ?: return
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                g.writeDescriptor(desc, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+            } else {
+                @Suppress("DEPRECATION")
+                desc.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                @Suppress("DEPRECATION")
+                g.writeDescriptor(desc)
+            }
+        } catch (e: SecurityException) {
+            Timber.w(e, "🔋 notificaciones de batería sin permiso")
         }
     }
 

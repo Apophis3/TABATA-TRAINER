@@ -47,6 +47,10 @@ import com.tuapp.tabatatrainer.data.local.WorkoutState
 import com.tuapp.tabatatrainer.data.local.SensorState
 import com.tuapp.tabatatrainer.data.local.SessionStats
 import com.tuapp.tabatatrainer.service.WorkoutService
+import com.tuapp.tabatatrainer.sensor.SensorBattery
+import com.tuapp.tabatatrainer.ui.components.BatteryBadge
+import com.tuapp.tabatatrainer.ui.components.BatteryLowWarnings
+import com.tuapp.tabatatrainer.ui.components.rememberSensorBatteries
 
 // ============================================================================
 // PALETA NIKE - SOLO CAMBIO DE COLORES
@@ -81,6 +85,7 @@ fun WorkoutScreen(
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    BatteryLowWarnings()
 
     var service by remember { mutableStateOf<WorkoutService?>(null) }
     var isBound by remember { mutableStateOf(false) }
@@ -932,65 +937,90 @@ private fun MetricsPanel(
     isCadence2Connected: Boolean = false,
     protocols: List<String?> = listOf(null, null, null, null)   // HR1, HR2, C1, C2
 ) {
-    Row(
+    val batteries = rememberSensorBatteries()
+    // Estrecho (móvil en vertical): 2 filas de 3; ancho: 1 fila de 6 (spec 005 T-05)
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
             .background(Color.Black.copy(alpha = 0.25f), RoundedCornerShape(18.dp))
-            .padding(16.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly
+            .padding(16.dp)
     ) {
-        // HR1
-        MetricItem(
-            icon = Icons.Default.Favorite,
-            value = if (isHrConnected || heartRate > 0) "$heartRate" else "--",
-            unit = "bpm",
-            label = "HR1",
-            isPrimary = true,
-            protocol = protocols[0]
-        )
-        // HR1 Máx
-        MetricItem(
-            icon = Icons.AutoMirrored.Filled.TrendingUp,
-            value = if (maxHeartRate > 0) "$maxHeartRate" else "--",
-            unit = "bpm",
-            label = "HR1 Máx"
-        )
-        // Cadencia 1
-        MetricItem(
-            icon = Icons.AutoMirrored.Filled.DirectionsBike,
-            value = if (isCadenceConnected || cadence > 0) "${cadence.toInt()}" else "--",
-            unit = "rpm",
-            label = "C1",
-            isPrimary = true,
-            protocol = protocols[2]
-        )
-        // HR2
-        MetricItem(
-            icon = Icons.Default.Favorite,
-            value = if (isHr2Connected || heartRate2 > 0) "$heartRate2" else "--",
-            unit = "bpm",
-            label = "HR2",
-            isPrimary = true,
-            color = TabataColors.HrCyan,
-            protocol = protocols[1]
-        )
-        // HR2 Máx
-        MetricItem(
-            icon = Icons.AutoMirrored.Filled.TrendingUp,
-            value = if (maxHeartRate2 > 0) "$maxHeartRate2" else "--",
-            unit = "bpm",
-            label = "HR2 Máx",
-            color = TabataColors.HrCyan
-        )
-        // Cadencia 2
-        MetricItem(
-            icon = Icons.AutoMirrored.Filled.DirectionsBike,
-            value = if (isCadence2Connected || cadence2 > 0) "${cadence2.toInt()}" else "--",
-            unit = "rpm",
-            label = "C2",
-            isPrimary = true,
-            protocol = protocols[3]
-        )
+        val hr1: @Composable () -> Unit = {
+            // HR1
+            MetricItem(
+                icon = Icons.Default.Favorite,
+                value = if (isHrConnected || heartRate > 0) "$heartRate" else "--",
+                unit = "bpm",
+                label = "HR1",
+                isPrimary = true,
+                protocol = protocols[0],
+                battery = batteries[0]
+            )
+        }
+        val hr1Max: @Composable () -> Unit = {
+            // HR1 Máx
+            MetricItem(
+                icon = Icons.AutoMirrored.Filled.TrendingUp,
+                value = if (maxHeartRate > 0) "$maxHeartRate" else "--",
+                unit = "bpm",
+                label = "HR1 Máx"
+            )
+        }
+        val c1: @Composable () -> Unit = {
+            // Cadencia 1
+            MetricItem(
+                icon = Icons.AutoMirrored.Filled.DirectionsBike,
+                value = if (isCadenceConnected || cadence > 0) "${cadence.toInt()}" else "--",
+                unit = "rpm",
+                label = "C1",
+                isPrimary = true,
+                protocol = protocols[2],
+                battery = batteries[2]
+            )
+        }
+        val hr2: @Composable () -> Unit = {
+            // HR2
+            MetricItem(
+                icon = Icons.Default.Favorite,
+                value = if (isHr2Connected || heartRate2 > 0) "$heartRate2" else "--",
+                unit = "bpm",
+                label = "HR2",
+                isPrimary = true,
+                color = TabataColors.HrCyan,
+                protocol = protocols[1],
+                battery = batteries[1]
+            )
+        }
+        val hr2Max: @Composable () -> Unit = {
+            // HR2 Máx
+            MetricItem(
+                icon = Icons.AutoMirrored.Filled.TrendingUp,
+                value = if (maxHeartRate2 > 0) "$maxHeartRate2" else "--",
+                unit = "bpm",
+                label = "HR2 Máx",
+                color = TabataColors.HrCyan
+            )
+        }
+        val c2: @Composable () -> Unit = {
+            // Cadencia 2
+            MetricItem(
+                icon = Icons.AutoMirrored.Filled.DirectionsBike,
+                value = if (isCadence2Connected || cadence2 > 0) "${cadence2.toInt()}" else "--",
+                unit = "rpm",
+                label = "C2",
+                isPrimary = true,
+                protocol = protocols[3],
+                battery = batteries[3]
+            )
+        }
+        if (maxWidth < 560.dp) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { hr1(); hr1Max(); c1() }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { hr2(); hr2Max(); c2() }
+            }
+        } else {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { hr1(); hr1Max(); c1(); hr2(); hr2Max(); c2() }
+        }
     }
 }
 
@@ -1013,11 +1043,12 @@ private fun MetricsPanelCompact(
     isCadence2Connected: Boolean = false,
     protocols: List<String?> = listOf(null, null, null, null)   // HR1, HR2, C1, C2
 ) {
+    val batteries = rememberSensorBatteries()
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(Color.Black.copy(alpha = 0.25f), RoundedCornerShape(18.dp))
-            .padding(16.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         // Primera fila: HR1, HR1 Máx, Cad1
@@ -1026,12 +1057,12 @@ private fun MetricsPanelCompact(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            MetricItemCompact(Icons.Default.Favorite, if (isHrConnected || heartRate > 0) "$heartRate" else "--", "HR1", TabataColors.HrPink, protocols[0])
+            MetricItemCompact(Icons.Default.Favorite, if (isHrConnected || heartRate > 0) "$heartRate" else "--", "HR1", TabataColors.HrPink, protocols[0], batteries[0])
             MetricItemCompact(Icons.AutoMirrored.Filled.TrendingUp, if (maxHeartRate > 0) "$maxHeartRate" else "--", "HR1 Máx", TabataColors.HrPink)
-            MetricItemCompact(Icons.AutoMirrored.Filled.DirectionsBike, if (isCadenceConnected || cadence > 0) "${cadence.toInt()}" else "--", "C1", Color.White, protocols[2])
+            MetricItemCompact(Icons.AutoMirrored.Filled.DirectionsBike, if (isCadenceConnected || cadence > 0) "${cadence.toInt()}" else "--", "C1", Color.White, protocols[2], batteries[2])
         }
         
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(6.dp))
         
         // Segunda fila: HR2, HR2 Máx, Cad2
         Row(
@@ -1039,17 +1070,17 @@ private fun MetricsPanelCompact(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            MetricItemCompact(Icons.Default.Favorite, if (isHr2Connected || heartRate2 > 0) "$heartRate2" else "--", "HR2", TabataColors.HrCyan, protocols[1])
+            MetricItemCompact(Icons.Default.Favorite, if (isHr2Connected || heartRate2 > 0) "$heartRate2" else "--", "HR2", TabataColors.HrCyan, protocols[1], batteries[1])
             MetricItemCompact(Icons.AutoMirrored.Filled.TrendingUp, if (maxHeartRate2 > 0) "$maxHeartRate2" else "--", "HR2 Máx", TabataColors.HrCyan)
-            MetricItemCompact(Icons.AutoMirrored.Filled.DirectionsBike, if (isCadence2Connected || cadence2 > 0) "${cadence2.toInt()}" else "--", "C2", Color.White, protocols[3])
+            MetricItemCompact(Icons.AutoMirrored.Filled.DirectionsBike, if (isCadence2Connected || cadence2 > 0) "${cadence2.toInt()}" else "--", "C2", Color.White, protocols[3], batteries[3])
         }
     }
 }
 
 @Composable
-private fun MetricItem(icon: ImageVector, value: String, unit: String, label: String, isPrimary: Boolean = false, color: Color = Color.White, protocol: String? = null) {
+private fun MetricItem(icon: ImageVector, value: String, unit: String, label: String, isPrimary: Boolean = false, color: Color = Color.White, protocol: String? = null, battery: SensorBattery? = null) {
+    // Sin icono (ahorra altura, spec 005 T-05): valor grande y debajo una sola fila etiqueta + protocolo + batería
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(icon, null, tint = color, modifier = Modifier.size(if (isPrimary) 22.dp else 18.dp))
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
                 text = value,
@@ -1061,11 +1092,16 @@ private fun MetricItem(icon: ImageVector, value: String, unit: String, label: St
                 text = unit,
                 fontSize = if (isPrimary) 14.sp else 10.sp,
                 color = color.copy(alpha = 0.7f),
+                maxLines = 1,
+                softWrap = false,
                 modifier = Modifier.padding(start = 2.dp, bottom = 4.dp)
             )
         }
-        Text(label, fontSize = 11.sp, color = color.copy(alpha = 0.6f))
-        ProtocolBadge(protocol)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(label, fontSize = 11.sp, color = color.copy(alpha = 0.6f), maxLines = 1)
+            ProtocolBadge(protocol)
+        }
+        BatteryBadge(battery, modifier = Modifier.padding(top = 2.dp))
     }
 }
 
@@ -1080,22 +1116,23 @@ private fun ProtocolBadge(protocol: String?) {
         fontWeight = FontWeight.Bold,
         color = c,
         modifier = Modifier
-            .padding(top = 2.dp)
             .background(c.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
             .padding(horizontal = 4.dp, vertical = 1.dp)
     )
 }
 
 @Composable
-private fun MetricItemCompact(icon: ImageVector, value: String, unit: String, color: Color = Color.White, protocol: String? = null) {
+private fun MetricItemCompact(icon: ImageVector, value: String, unit: String, color: Color = Color.White, protocol: String? = null, battery: SensorBattery? = null) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(icon, null, tint = color, modifier = Modifier.size(28.dp))
-        Spacer(modifier = Modifier.height(4.dp))
         Row(verticalAlignment = Alignment.Bottom) {
-            Text(value, fontSize = 36.sp, fontWeight = FontWeight.Bold, color = color)
-            Text(unit, fontSize = 14.sp, color = color.copy(alpha = 0.7f), modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
+            Text(value, fontSize = 30.sp, fontWeight = FontWeight.Bold, color = color)
+            Text(unit, fontSize = 13.sp, color = color.copy(alpha = 0.7f), maxLines = 1, softWrap = false, modifier = Modifier.padding(start = 4.dp, bottom = 5.dp))
         }
-        ProtocolBadge(protocol)
+        // En horizontal sobra ancho y falta alto: protocolo y batería en la misma fila para dejar sitio a la gráfica
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            ProtocolBadge(protocol)
+            BatteryBadge(battery)
+        }
     }
 }
 

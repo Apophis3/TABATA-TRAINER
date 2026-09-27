@@ -32,6 +32,8 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.tuapp.tabatatrainer.sensor.BatteryLevel
+import com.tuapp.tabatatrainer.sensor.SensorBattery
 import com.tuapp.tabatatrainer.ui.theme.TabataColors
 import com.tuapp.tabatatrainer.ui.theme.TabataSizes
 
@@ -1127,5 +1129,31 @@ fun PrimaryActionButton(
             fontWeight = FontWeight.Bold,
             letterSpacing = 1.sp
         )
+    }
+}
+// ============================================================================
+// BATERÍA DE SENSOR (spec 005)
+// ============================================================================
+
+/** Icono de batería + "%" (BLE) o solo icono (ANT+). Sin dato → no pinta nada */
+@Composable
+fun BatteryBadge(battery: SensorBattery?, modifier: Modifier = Modifier, fontSize: TextUnit = 10.sp, label: String? = null) {
+    if (battery == null || battery.level == BatteryLevel.UNKNOWN) return
+    val color = when (battery.level) {
+        BatteryLevel.GOOD -> Color(0xFF66BB6A)
+        BatteryLevel.OK -> Color(0xFFFFEB3B)
+        BatteryLevel.LOW -> Color(0xFFFF9800)
+        else -> Color(0xFFF44336)
+    }
+    val icon = when (battery.level) {
+        BatteryLevel.GOOD -> Icons.Default.BatteryFull
+        BatteryLevel.OK -> Icons.Default.Battery4Bar
+        BatteryLevel.LOW -> Icons.Default.Battery2Bar
+        else -> Icons.Default.BatteryAlert
+    }
+    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+        label?.let { Text("$it ", fontSize = fontSize, color = Color.White.copy(alpha = 0.6f), fontWeight = FontWeight.Medium) }
+        Icon(icon, contentDescription = "Batería", tint = color, modifier = Modifier.size(fontSize.value.dp + 4.dp))
+        battery.percent?.let { Text("$it%", fontSize = fontSize, color = color, fontWeight = FontWeight.Medium) }
     }
 }

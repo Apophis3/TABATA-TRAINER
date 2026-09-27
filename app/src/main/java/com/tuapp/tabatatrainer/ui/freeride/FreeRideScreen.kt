@@ -50,6 +50,9 @@ import com.tuapp.tabatatrainer.service.FreeRideService
 import com.tuapp.tabatatrainer.service.FreeRideStats
 import com.tuapp.tabatatrainer.service.LapData
 import com.tuapp.tabatatrainer.service.MapPoint
+import com.tuapp.tabatatrainer.ui.components.BatteryBadge
+import com.tuapp.tabatatrainer.ui.components.BatteryLowWarnings
+import com.tuapp.tabatatrainer.ui.components.rememberSensorBatteries
 import com.tuapp.tabatatrainer.ui.theme.TabataColors
 import com.tuapp.tabatatrainer.ui.theme.TabataSizes
 
@@ -67,6 +70,7 @@ fun FreeRideScreen(
     val configuration = LocalConfiguration.current
     // Usar screenWidthDp para detectar orientación de forma más confiable
     val isLandscape = configuration.screenWidthDp > configuration.screenHeightDp
+    BatteryLowWarnings()
 
     var service by remember { mutableStateOf<FreeRideService?>(null) }
     var isBound by remember { mutableStateOf(false) }
@@ -1184,6 +1188,7 @@ private fun StatusLabel(stats: FreeRideStats, fontSize: Int = 16) {
 
 @Composable
 private fun FreeRideSensorBar(stats: FreeRideStats, onReconnect: () -> Unit) {
+    val batteries = rememberSensorBatteries()
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1193,8 +1198,16 @@ private fun FreeRideSensorBar(stats: FreeRideStats, onReconnect: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         SensorChipAnimated(Icons.Default.GpsFixed, "GPS", stats.isGpsConnected, stats.isGpsScanning, TabataColors.WorkGreen)
-        SensorChipAnimated(Icons.Default.Favorite, "HR", stats.isHrConnected, stats.isHrScanning, Color(0xFFE91E63))
-        SensorChipAnimated(Icons.AutoMirrored.Filled.DirectionsBike, "CAD", stats.isCadenceConnected, stats.isCadenceScanning, TabataColors.RoundsBlue)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            SensorChipAnimated(Icons.Default.Favorite, "HR", stats.isHrConnected, stats.isHrScanning, Color(0xFFE91E63))
+            BatteryBadge(batteries[0])
+            BatteryBadge(batteries[1])
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            SensorChipAnimated(Icons.AutoMirrored.Filled.DirectionsBike, "CAD", stats.isCadenceConnected, stats.isCadenceScanning, TabataColors.RoundsBlue)
+            BatteryBadge(batteries[2])
+            BatteryBadge(batteries[3])
+        }
         IconButton(onClick = onReconnect, modifier = Modifier.size(32.dp)) {
             Icon(Icons.Default.Refresh, "Reconectar", tint = Color.White.copy(alpha = 0.7f))
         }

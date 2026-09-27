@@ -16,6 +16,7 @@ import com.dsi.ant.plugins.antplus.pcc.defines.DeviceState
 import com.dsi.ant.plugins.antplus.pccbase.AntPluginPcc
 import com.dsi.ant.plugins.antplus.pccbase.PccReleaseHandle
 import com.dsi.ant.plugins.antplus.pcc.defines.EventFlag
+import android.os.Build
 import com.tuapp.tabatatrainer.util.PermissionHelper
 import com.tuapp.tabatatrainer.util.AppConstants
 import com.tuapp.tabatatrainer.data.local.DeviceProfileDao
@@ -82,6 +83,43 @@ class SensorManager @Inject constructor(
     // UUIDs BLE
     private val HR_SERVICE_UUID = UUID.fromString("0000180D-0000-1000-8000-00805f9b34fb")
     private val CSC_SERVICE_UUID = UUID.fromString("00001816-0000-1000-8000-00805f9b34fb")
+    private val BATTERY_SERVICE_UUID = UUID.fromString("0000180F-0000-1000-8000-00805f9b34fb")
+    private val BATTERY_LEVEL_UUID = UUID.fromString("00002A19-0000-1000-8000-00805f9b34fb")
+    private val CCC_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+
+    // --- Batería de cadencia C1/C2 (spec 005, T-04). Solo informativa: nunca conecta ni desconecta nada ---
+    private val cadenceBatteries = List(2) { MutableStateFlow<SensorBattery?>(null) }
+    fun cadenceBattery(slot: Int): StateFlow<SensorBattery?> = cadenceBatteries[slot].asStateFlow()
+    fun hrBattery(slot: Int): StateFlow<SensorBattery?> = heartRateHub.slotBattery(slot)
+
+    private fun setCadenceBattery(slot: Int, battery: SensorBattery?) {
+        cadenceBatteries[slot].value = battery
+        if (battery != null) Timber.d("🔋 CAD${slot + 1}: ${battery.percent?.let { "$it %" } ?: battery.level}")
+    }
+
+    /** Tras activar las notificaciones CSC: leer la batería (una operación GATT cada vez) */
+    @SuppressLint("MissingPermission")
+    private fun readBleBatteryAfterCsc(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor) {
+        if (!descriptor.characteristic.uuid.toString().lowercase().startsWith("00002a5b")) return
+        val ch = gatt.getService(BATTERY_SERVICE_UUID)?.getCharacteristic(BATTERY_LEVEL_UUID) ?: return
+        try { gatt.readCharacteristic(ch) } catch (e: SecurityException) { Timber.w("🔋 CAD: sin permiso") }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun onBleBatteryRead(slot: Int, gatt: BluetoothGatt, ch: BluetoothGattCharacteristic, value: ByteArray?, status: Int) {
+        if (ch.uuid != BATTERY_LEVEL_UUID) return
+        if (status != BluetoothGatt.GATT_SUCCESS) { Timber.w("🔋 CAD${slot + 1}: lectura fallida ($status)"); return }
+        setCadenceBattery(slot, SensorBattery.parseBleBatteryLevel(value))
+        if (ch.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0) {
+            try {
+                gatt.setCharacteristicNotification(ch, true)
+                ch.getDescriptor(CCC_UUID)?.let {
+                    it.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                    gatt.writeDescriptor(it)
+                }
+            } catch (e: SecurityException) { Timber.w("🔋 CAD${slot + 1}: sin permiso") }
+        }
+    }
 
     // --- ANT+ Handles (Para cerrar conexión limpiamente) ---
     private var hrAntHandle: PccReleaseHandle<AntPlusHeartRatePcc>? = null
@@ -618,6 +656,9 @@ class SensorManager @Inject constructor(
                                         Timber.e(e, "Error en callback de datos Cadence")
                                     }
                                 }
+                                result.subscribeBatteryStatusEvent { _, _, voltage, status ->
+                                    setCadenceBattery(0, SensorBattery.fromAntStatus(status?.name, voltage?.toFloat()))
+                                }
                             } catch (e: Exception) {
                                 Timber.e(e, "Error al suscribirse a eventos Cadence")
                             }
@@ -665,6 +706,7 @@ class SensorManager @Inject constructor(
                         // Dispositivo desconectado o perdido
                         if (isConnected) {
                             isConnected = false
+                            setCadenceBattery(0, null)
                             try {
                                 trySend(CadenceReading.Disconnected)
                             } catch (e: Exception) {
@@ -881,6 +923,7 @@ class SensorManager @Inject constructor(
                             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                             Timber.w("⚠️ CAD: Desconectado")
                                 isConnected = false
+                                setCadenceBattery(0, null)
                                 lastCrankRevs = -1
                                 lastCrankTime = -1
                             trySend(CadenceReading.Disconnected)
@@ -928,8 +971,25 @@ class SensorManager @Inject constructor(
                     }
 
                     @SuppressLint("MissingPermission")
+                    override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+                        if (status == BluetoothGatt.GATT_SUCCESS) readBleBatteryAfterCsc(gatt, descriptor)
+                    }
+
+                    override fun onCharacteristicRead(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray, status: Int) {
+                        onBleBatteryRead(0, gatt, characteristic, value, status)
+                    }
+
+                    @Deprecated("API < 33")
+                    override fun onCharacteristicRead(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) onBleBatteryRead(0, gatt, characteristic, characteristic.value, status)
+                    }
+
+                    @SuppressLint("MissingPermission")
                         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
                             val data = characteristic.value
+                            if (characteristic.uuid == BATTERY_LEVEL_UUID) {
+                                setCadenceBattery(0, SensorBattery.parseBleBatteryLevel(data)); return
+                            }
                             if (data != null && data.isNotEmpty()) {
                             val flags = data[0].toInt() and 0xFF
                                 var offset = 1
@@ -1168,6 +1228,9 @@ val retryJob = CoroutineScope(Dispatchers.Default).launch {
                                             Timber.e(e, "Error en callback de datos CAD2")
                                         }
                                     }
+                                    result.subscribeBatteryStatusEvent { _, _, voltage, status ->
+                                        setCadenceBattery(1, SensorBattery.fromAntStatus(status?.name, voltage?.toFloat()))
+                                    }
                                     Timber.d("🚴2 ANT+ CAD2: Suscripción a eventos completada")
                                 } catch (e: Exception) {
                                     Timber.e(e, "❌ Error crítico al suscribirse a eventos CAD2: ${e.message}")
@@ -1241,6 +1304,7 @@ val retryJob = CoroutineScope(Dispatchers.Default).launch {
                     DeviceState.DEAD -> {
                         if (isConnected) {
                             isConnected = false
+                            setCadenceBattery(1, null)
                             try {
                                 trySend(CadenceReading.Disconnected)
                             } catch (e: Exception) {
@@ -1393,6 +1457,7 @@ val retryJob = CoroutineScope(Dispatchers.Default).launch {
                                         } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                                             trySend(CadenceReading.Disconnected)
                                             isConnected = false
+                                            setCadenceBattery(1, null)
                                             lastCrankRevs2 = -1
                                             lastCrankTime2 = -1
                                         }
@@ -1417,9 +1482,26 @@ val retryJob = CoroutineScope(Dispatchers.Default).launch {
                                     }
 
                                     @SuppressLint("MissingPermission")
+                                    override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+                                        if (status == BluetoothGatt.GATT_SUCCESS) readBleBatteryAfterCsc(gatt, descriptor)
+                                    }
+
+                                    override fun onCharacteristicRead(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray, status: Int) {
+                                        onBleBatteryRead(1, gatt, characteristic, value, status)
+                                    }
+
+                                    @Deprecated("API < 33")
+                                    override fun onCharacteristicRead(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+                                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) onBleBatteryRead(1, gatt, characteristic, characteristic.value, status)
+                                    }
+
+                                    @SuppressLint("MissingPermission")
                                     override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
                                         try {
                                             val data = characteristic.value
+                                            if (characteristic.uuid == BATTERY_LEVEL_UUID) {
+                                                setCadenceBattery(1, SensorBattery.parseBleBatteryLevel(data)); return
+                                            }
                                             if (data != null && data.isNotEmpty()) {
                                                 val flags = data[0].toInt() and 0xFF
                                                 var offset = 1
