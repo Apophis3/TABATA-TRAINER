@@ -6,6 +6,8 @@ import android.net.Uri
 import android.util.Log
 import androidx.core.content.FileProvider
 import com.tuapp.tabatatrainer.data.local.GpsPointEntity
+import com.tuapp.tabatatrainer.data.local.LapEntity
+import com.tuapp.tabatatrainer.util.laps.LapExportRows
 import com.tuapp.tabatatrainer.data.local.SensorReadingEntity
 import com.tuapp.tabatatrainer.data.local.WorkoutSessionEntity
 import org.apache.poi.ss.usermodel.*
@@ -26,7 +28,8 @@ object ExportUtils {
         context: Context,
         session: WorkoutSessionEntity,
         readings: List<SensorReadingEntity>,
-        gpsPoints: List<GpsPointEntity> = emptyList()
+        gpsPoints: List<GpsPointEntity> = emptyList(),
+        laps: List<LapEntity> = emptyList()
     ): File? {
         return try {
             val workbook = XSSFWorkbook()
@@ -45,8 +48,8 @@ object ExportUtils {
             }
             
             // === HOJA 4: LAPS (solo para FreeRide) ===
-            if (session.activityType == "FREE_RIDE" && gpsPoints.isNotEmpty()) {
-                createLapsSheet(workbook, gpsPoints, session)
+            if (session.activityType == "FREE_RIDE" && laps.isNotEmpty()) {
+                createLapsSheet(workbook, laps)
             }
             
             // === HOJA 5: SENSORES (solo para FreeRide, estadísticas agregadas) ===
@@ -515,12 +518,12 @@ object ExportUtils {
     }
     
     /**
-     * Crea hoja de Laps para FreeRide basada en puntos GPS agrupados por round
+     * Crea hoja de Laps para FreeRide a partir de las vueltas persistidas (spec 006, RF-P2).
+     * El tipo (Auto/Manual) es el guardado en cada vuelta; no se deduce de la distancia.
      */
     private fun createLapsSheet(
         workbook: XSSFWorkbook,
-        gpsPoints: List<GpsPointEntity>,
-        session: WorkoutSessionEntity
+        laps: List<LapEntity>
     ) {
         val sheet = workbook.createSheet("Laps")
 
@@ -535,7 +538,10 @@ object ExportUtils {
 
         // Cabeceras
         val headerRow = sheet.createRow(0)
-        val headers = listOf("Lap #", "Tipo", "Tiempo (s)", "Distancia (m)", "Distancia (km)", "Vel. Media (km/h)", "Vel. Máx (km/h)", "HR Media", "HR Máx", "Cadencia Media")
+        val headers = listOf(
+            "Lap #", "Tipo", "Nº en su serie", "Tiempo (s)", "Distancia (m)", "Distancia (km)",
+            "Vel. Media (km/h)", "Vel. Máx (km/h)", "HR Media", "HR Máx", "Cadencia Media (rpm)", "Pasos"
+        )
         headers.forEachIndexed { index, header ->
             headerRow.createCell(index).apply {
                 setCellValue(header)
@@ -543,56 +549,32 @@ object ExportUtils {
             }
         }
 
-        // Agrupar puntos por round (lap)
-        val lapsByRound = gpsPoints.groupBy { it.round }
-        
-        // Calcular estadísticas por lap
-        var rowNum = 1
-        lapsByRound.forEach { (round, points) ->
-            if (points.isEmpty()) return@forEach
-            
-            val sortedPoints = points.sortedBy { it.timestamp }
-            val startTime = sortedPoints.first().timestamp
-            val endTime = sortedPoints.last().timestamp
-            val lapTimeSeconds = ((endTime - startTime) / 1000).toInt()
-            
-            // Calcular distancia del lap
-            var lapDistance = 0.0
-            for (i in 1 until sortedPoints.size) {
-                val p1 = sortedPoints[i - 1]
-                val p2 = sortedPoints[i]
-                val distance = calculateHaversineDistance(p1.latitude, p1.longitude, p2.latitude, p2.longitude)
-                lapDistance += distance
+        LapExportRows.from(laps).forEachIndexed { i, lap ->
+            val row = sheet.createRow(i + 1)
+            row.createCell(0).setCellValue(lap.order.toDouble())
+            row.createCell(1).setCellValue(lap.typeLabel)
+            row.createCell(2).setCellValue(lap.typeNumber.toDouble())
+            row.createCell(3).setCellValue(lap.durationSeconds.toDouble())
+            row.createCell(4).setCellValue(lap.distanceMeters)
+            row.createCell(5).setCellValue(lap.distanceMeters / 1000.0)
+            row.createCell(6).setCellValue(lap.avgSpeedKmh)
+            row.createCell(7).setCellValue(lap.maxSpeedKmh)
+            // Sin dato → "--" (nunca 0, que se confundiría con una medida real)
+            fun numberOrDash(col: Int, v: Double?) {
+                if (v != null) row.createCell(col).setCellValue(v) else row.createCell(col).setCellValue("--")
             }
-            
-            // Calcular velocidades
-            val speeds = sortedPoints.mapNotNull { it.speed?.toDouble()?.times(3.6) } // km/h
-            val avgSpeed = if (speeds.isNotEmpty()) speeds.average() else 0.0
-            val maxSpeed = speeds.maxOrNull() ?: 0.0
-            
-            // Determinar tipo de lap (auto-lap si es múltiplo de 1km aproximadamente)
-            val isAutoLap = lapDistance >= 900 && lapDistance <= 1100 // Entre 900m y 1.1km
-            
-            val row = sheet.createRow(rowNum++)
-            row.createCell(0).setCellValue(round.toDouble())
-            row.createCell(1).setCellValue(if (isAutoLap) "Auto (1km)" else "Manual")
-            row.createCell(2).setCellValue(lapTimeSeconds.toDouble())
-            row.createCell(3).setCellValue(lapDistance)
-            row.createCell(4).setCellValue(lapDistance / 1000.0)
-            row.createCell(5).setCellValue(avgSpeed)
-            row.createCell(6).setCellValue(maxSpeed)
-            // HR y Cadencia no están en GPS points, se dejan vacíos
-            row.createCell(7).setCellValue("--")
-            row.createCell(8).setCellValue("--")
-            row.createCell(9).setCellValue("--")
+            numberOrDash(8, lap.avgHeartRate?.toDouble())
+            numberOrDash(9, lap.maxHeartRate?.toDouble())
+            numberOrDash(10, lap.avgCadence?.toDouble())
+            numberOrDash(11, lap.steps?.toDouble())
         }
 
         // Ajustar anchos
-        for (i in 0..9) {
+        for (i in 0..11) {
             sheet.setColumnWidth(i, 18 * 256)
         }
     }
-    
+
     /**
      * Crea hoja de Sensores con estadísticas agregadas para FreeRide
      */

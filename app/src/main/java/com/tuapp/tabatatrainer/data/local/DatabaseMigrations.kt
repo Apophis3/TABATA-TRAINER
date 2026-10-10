@@ -13,6 +13,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * - Versión 6: Añadida columna heartRate2 a sensor_readings
  * - Versión 7: Añadida tabla device_profiles para persistencia de sensores
  * - Versión 9: Añadidos totalSteps, avgStrideM y avgStepCadence a workout_sessions
+ * - Versión 10: lap_records distingue vueltas AUTO/MANUAL (type, typeNumber) y guarda steps y cadenceSource
  */
 object DatabaseMigrations {
 
@@ -168,12 +169,33 @@ object DatabaseMigrations {
     }
 
     /**
+     * Sentencias de la migración 9 → 10 (spec 006, T-04). `lap_records` estaba siempre vacía
+     * (nadie llamaba a `insertLap`), por lo que los DEFAULT solo cubren el hipotético caso de filas previas.
+     */
+    val MIGRATION_9_10_STATEMENTS = listOf(
+        "ALTER TABLE lap_records ADD COLUMN type TEXT NOT NULL DEFAULT 'MANUAL'",
+        "ALTER TABLE lap_records ADD COLUMN typeNumber INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE lap_records ADD COLUMN steps INTEGER",
+        "ALTER TABLE lap_records ADD COLUMN cadenceSource TEXT"
+    )
+
+    /**
+     * Migración de versión 9 a 10: vueltas AUTO/MANUAL con numeración propia por serie
+     */
+    val MIGRATION_9_10 = object : Migration(9, 10) {
+        override fun migrate(database: SupportSQLiteDatabase) {
+            MIGRATION_9_10_STATEMENTS.forEach { database.execSQL(it) }
+        }
+    }
+
+    /**
      * Lista de todas las migraciones disponibles
      */
     val ALL_MIGRATIONS = arrayOf(
         MIGRATION_4_5,
         MIGRATION_5_6,
         MIGRATION_6_7,
-        MIGRATION_8_9
+        MIGRATION_8_9,
+        MIGRATION_9_10
     )
 }

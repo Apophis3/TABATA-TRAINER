@@ -32,6 +32,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tuapp.tabatatrainer.data.local.*
 import com.tuapp.tabatatrainer.util.ExportUtils
+import com.tuapp.tabatatrainer.util.laps.ManualLapSummary
+import com.tuapp.tabatatrainer.util.laps.SessionDeletion
+import com.tuapp.tabatatrainer.util.laps.SessionLapSummaryModel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -55,20 +58,27 @@ class SessionDetailViewModel @Inject constructor(
     private val _gpsPoints = MutableStateFlow<List<GpsPointEntity>>(emptyList())
     val gpsPoints: StateFlow<List<GpsPointEntity>> = _gpsPoints.asStateFlow()
 
+    private val _laps = MutableStateFlow<List<LapEntity>>(emptyList())
+    val laps: StateFlow<List<LapEntity>> = _laps.asStateFlow()
+
     fun loadSession(sessionId: String) {
         viewModelScope.launch {
             _session.value = sessionDao.getSessionById(sessionId)
             _readings.value = sensorReadingDao.getReadingsForSessionSync(sessionId)
             _gpsPoints.value = gpsDao.getPointsForSessionSync(sessionId)
+            _laps.value = gpsDao.getLapsForSessionSync(sessionId)
         }
     }
 
     fun deleteSession(onDeleted: () -> Unit) {
         viewModelScope.launch {
             _session.value?.let { session ->
-                gpsDao.deletePointsForSession(session.id)
-                sensorReadingDao.deleteReadingsForSession(session.id)
-                sessionDao.deleteSession(session)
+                SessionDeletion.deleteWithChildren(
+                    deleteLaps = { gpsDao.deleteLapsForSession(session.id) },
+                    deleteGpsPoints = { gpsDao.deletePointsForSession(session.id) },
+                    deleteSensorReadings = { sensorReadingDao.deleteReadingsForSession(session.id) },
+                    deleteSession = { sessionDao.deleteSession(session) }
+                )
                 onDeleted()
             }
         }
@@ -108,6 +118,7 @@ fun SessionDetailScreen(
     val session by viewModel.session.collectAsState()
     val readings by viewModel.readings.collectAsState()
     val gpsPoints by viewModel.gpsPoints.collectAsState()
+    val laps by viewModel.laps.collectAsState()
 
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showNotesDialog by remember { mutableStateOf(false) }
@@ -160,6 +171,13 @@ fun SessionDetailScreen(
                     GpsMetricsGrid(session = sess)
                 }
 
+                // Resumen por vuelta manual (solo si hubo)
+                val manualSummaries = remember(laps) { SessionLapSummaryModel.from(laps) }
+                if (manualSummaries.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    ManualLapsSummaryCard(manualSummaries)
+                }
+
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Gráfico de HR
@@ -191,7 +209,7 @@ fun SessionDetailScreen(
                         coroutineScope.launch {
                             try {
                                 isExporting = true
-                                val file = ExportUtils.exportToExcel(applicationContext, sess, readings, gpsPoints)
+                                val file = ExportUtils.exportToExcel(applicationContext, sess, readings, gpsPoints, laps)
                                 isExporting = false
                                 if (file != null) {
                                     // Usar context de actividad para el share (necesita UI)
@@ -786,6 +804,49 @@ private fun HeartRateChart(
                 if (path2Started) {
                     drawPath(path = bridge2, color = Color(0xFF00BCD4).copy(alpha = 0.5f), style = Stroke(width = 3f, pathEffect = dashEffect))
                     drawPath(path = path2, color = Color(0xFF00BCD4), style = Stroke(width = 3f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ManualLapsSummaryCard(summaries: List<ManualLapSummary>) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "Vueltas manuales (${summaries.size})",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold
+            )
+            summaries.forEach { lap ->
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.Flag,
+                        contentDescription = null,
+                        tint = Color(0xFFFFB74D),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(lap.title, fontWeight = FontWeight.Bold)
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                lap.items.chunked(3).forEach { rowItems ->
+                    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                        rowItems.forEach { item ->
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(item.value, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    item.label,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        // Relleno para que la última fila no estire sus celdas
+                        repeat(3 - rowItems.size) { Spacer(modifier = Modifier.weight(1f)) }
+                    }
                 }
             }
         }

@@ -6,12 +6,31 @@ import android.content.pm.ServiceInfo
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.tuapp.tabatatrainer.MainActivity
 import com.tuapp.tabatatrainer.data.local.*
 import com.tuapp.tabatatrainer.sensor.*
 import com.tuapp.tabatatrainer.sensor.StepCounter
+import com.tuapp.tabatatrainer.util.Sound
+import com.tuapp.tabatatrainer.util.SoundPlayer
+import com.tuapp.tabatatrainer.util.laps.AutoLapCrossing
+import com.tuapp.tabatatrainer.util.laps.AutoLapTracker
+import com.tuapp.tabatatrainer.util.laps.BlockCounters
+import com.tuapp.tabatatrainer.util.laps.BlockMetrics
+import com.tuapp.tabatatrainer.util.laps.CadenceDisplayPolicy
+import com.tuapp.tabatatrainer.util.laps.CadenceSource
+import com.tuapp.tabatatrainer.util.laps.CadenceSlotMode
+import com.tuapp.tabatatrainer.util.laps.KmAlert
+import com.tuapp.tabatatrainer.util.laps.KmAlertGate
+import com.tuapp.tabatatrainer.util.laps.LapBlockMetrics
+import com.tuapp.tabatatrainer.util.laps.LapBook
+import com.tuapp.tabatatrainer.util.laps.LapRecord
+import com.tuapp.tabatatrainer.util.laps.LapType
+import com.tuapp.tabatatrainer.util.laps.PaceCalculator
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -45,9 +64,19 @@ data class FreeRideStats(
     val isHrScanning: Boolean = false,
     val isCadenceConnected: Boolean = false,
     val isCadenceScanning: Boolean = false,
+    // true = el sensor de cadencia está emparejado Y emitiendo (dato en los últimos 5 s)
+    val cadenceActive: Boolean = false,
+    // Ritmo en vivo (s/km) sobre ventana de 10 s; null = sin movimiento fiable
+    val paceSecPerKm: Int? = null,
+    // Total de vueltas (AUTO + MANUAL)
     val lapsCount: Int = 0,
+    // Solo vueltas manuales: la tarjeta "Vuelta" de la página 3 cuenta solo estas
+    val manualLapsCount: Int = 0,
     val currentLapDistanceMeters: Float = 0f,
     val currentLapTimeSeconds: Int = 0,
+    // Pasos y desnivel+ de la vuelta manual en curso (null = sin dato); los pinta la ventana 3
+    val currentLapSteps: Int? = null,
+    val currentLapElevationGainM: Float? = null,
     val latitude: Double = 0.0,
     val longitude: Double = 0.0,
     // Podómetro
@@ -57,17 +86,45 @@ data class FreeRideStats(
 )
 
 data class LapData(
-    val number: Int,
+    val number: Int,                      // orden global de creación (AUTO y MANUAL mezcladas)
+    val type: LapType = LapType.MANUAL,
+    val typeNumber: Int = 0,              // número dentro de su serie (AUTO 1,2,3… / MANUAL 1,2,3…)
     val startTimeSeconds: Int,
     val endTimeSeconds: Int,
     val distanceMeters: Float,
+    val startDistanceMeters: Float = 0f,
     val avgSpeedKmh: Float,
     val maxSpeedKmh: Float = 0f,
     val avgHeartRate: Int,
     val maxHeartRate: Int = 0,
     val avgCadence: Float = 0f,
-    val timestamp: Long = System.currentTimeMillis(),
-    val isAutoLap: Boolean = false  // true = auto-lap cada 1 km, false = lap manual
+    val steps: Int? = null,
+    val elevationGain: Float? = null,
+    val cadenceSource: CadenceSource = CadenceSource.NONE,
+    val startTimestamp: Long = 0L,
+    val timestamp: Long = System.currentTimeMillis()   // fin de la vuelta (reloj de pared)
+) {
+    val isAutoLap: Boolean get() = type == LapType.AUTO
+}
+
+/** Fila Room de una vuelta ya cerrada; 0 en FC/cadencia significa "sin dato" y se guarda como null */
+fun LapData.toEntity(sessionId: String) = LapEntity(
+    sessionId = sessionId,
+    lapNumber = number,
+    startTimestamp = startTimestamp,
+    endTimestamp = timestamp,
+    startDistanceMeters = startDistanceMeters,
+    endDistanceMeters = startDistanceMeters + distanceMeters,
+    avgSpeedKmh = avgSpeedKmh,
+    maxSpeedKmh = maxSpeedKmh,
+    avgHeartRate = avgHeartRate.takeIf { it > 0 },
+    maxHeartRate = maxHeartRate.takeIf { it > 0 },
+    avgCadence = avgCadence.takeIf { it > 0f },
+    elevationGain = elevationGain,
+    type = type.name,
+    typeNumber = typeNumber,
+    steps = steps,
+    cadenceSource = cadenceSource.name
 )
 
 // Punto simplificado para el mapa (más ligero que GpsPointEntity)
@@ -97,6 +154,7 @@ class FreeRideService : Service() {
     @Inject lateinit var gpsDao: GpsDao
     @Inject lateinit var sensorReadingDao: SensorReadingDao
     @Inject lateinit var stepCounter: StepCounter
+    @Inject lateinit var soundPlayer: SoundPlayer
 
     // Podómetro: último valor bruto visto y pasos de los últimos 10 s (para pasos/min)
     private var lastRawSteps: Long? = null
@@ -115,12 +173,29 @@ class FreeRideService : Service() {
     private val _mapPoints = MutableStateFlow<List<MapPoint>>(emptyList())
     val mapPoints: StateFlow<List<MapPoint>> = _mapPoints.asStateFlow()
 
+    // Aviso de km completado (R3): la UI muestra el banner; sonido y vibración los dispara el
+    // servicio para que suenen también con la pantalla apagada
+    private val _kmAlerts = MutableSharedFlow<KmAlert>(extraBufferCapacity = 4)
+    val kmAlerts: SharedFlow<KmAlert> = _kmAlerts.asSharedFlow()
+    private val autoLapTracker = AutoLapTracker()
+    private val lapBook = LapBook()
+    // Contadores acumulados (pasos, desnivel) al abrirse la ventana de cada serie; la métrica de la vuelta es la diferencia
+    private var manualWindowStartCounters = BlockCounters()
+    private var autoWindowStartCounters = BlockCounters()
+    private var stepsSeen = false   // el podómetro ha emitido alguna vez en esta ruta (si no, "sin dato", no 0)
+    private val kmAlertGate = KmAlertGate()
+
     private var currentSessionId: String? = null
     private var timerJob: Job? = null
     private var hrCollectorJob: Job? = null
     private var hr2CollectorJob: Job? = null
     private var cadenceCollectorJob: Job? = null
+    private var cadenceWatchdogJob: Job? = null
     private var gpsCollectorJob: Job? = null
+
+    // Instante (reloj de pared) del último dato del sensor de cadencia; null = ninguno vigente
+    @Volatile private var lastCadenceSampleAtMs: Long? = null
+    private val paceCalculator = PaceCalculator()
 
     private val hrReadings = mutableListOf<Int>()
     private val hr2Readings = mutableListOf<Int>()
@@ -131,21 +206,16 @@ class FreeRideService : Service() {
     private val gpsPointsBuffer = mutableListOf<GpsPointEntity>()
 
     // Para cálculo de LAPs
-    private var lastLapTimeSeconds = 0
-    private var lastLapDistanceMeters = 0f
     private var lastLapHrReadings = mutableListOf<Int>()
     private var lastLapCadenceReadings = mutableListOf<Float>()
     private var lastLapMaxSpeed = 0f
     private var lastLapMaxHr = 0
     
     // Para Auto-Lap independiente (cada 1 km)
-    private var lastAutoLapDistanceMeters = 0f
-    private var lastAutoLapTimeSeconds = 0
     private var autoLapHrReadings = mutableListOf<Int>()
     private var autoLapCadenceReadings = mutableListOf<Float>()
     private var autoLapMaxSpeed = 0f
     private var autoLapMaxHr = 0
-    private var lastAutoLapTimestamp = 0L // Protección contra auto-laps duplicados
 
     private var previousAltitude: Float? = null
     private var totalElevationGain = 0f
@@ -404,10 +474,12 @@ class FreeRideService : Service() {
                         }
                         is CadenceReading.Value -> {
                             Log.d(TAG, "🚴 Cadencia: Valor recibido: ${reading.rpm} rpm")
+                            lastCadenceSampleAtMs = System.currentTimeMillis()
                             _stats.update {
                                 it.copy(
                                     isCadenceScanning = false,
                                     isCadenceConnected = true,
+                                    cadenceActive = true,
                                     cadence = reading.rpm.toFloat()
                                 )
                             }
@@ -422,11 +494,13 @@ class FreeRideService : Service() {
                         }
                         is CadenceReading.Disconnected -> {
                             Log.d(TAG, "🚴 Cadencia: Desconectado")
-                            _stats.update { it.copy(isCadenceScanning = false, isCadenceConnected = false) }
+                            lastCadenceSampleAtMs = null
+                            _stats.update { it.copy(isCadenceScanning = false, isCadenceConnected = false, cadenceActive = false) }
                         }
                         is CadenceReading.Error -> {
                             Log.e(TAG, "🚴 Cadencia: Error - ${reading.message}")
-                            _stats.update { it.copy(isCadenceScanning = false, isCadenceConnected = false) }
+                            lastCadenceSampleAtMs = null
+                            _stats.update { it.copy(isCadenceScanning = false, isCadenceConnected = false, cadenceActive = false) }
                         }
                         else -> {
                             Log.d(TAG, "🚴 Cadencia: Estado desconocido: ${reading::class.simpleName}")
@@ -436,6 +510,20 @@ class FreeRideService : Service() {
             } catch (e: Exception) {
                 Log.e(TAG, "❌ Excepción en collector Cadencia: ${e.message}", e)
                 _stats.update { it.copy(isCadenceScanning = false, isCadenceConnected = false) }
+            }
+        }
+
+        // Vigilante: sin datos recientes del sensor la cadencia cede el hueco al ritmo (y viceversa)
+        cadenceWatchdogJob?.cancel()
+        cadenceWatchdogJob = serviceScope.launch {
+            while (isActive) {
+                delay(1000)
+                val active = CadenceDisplayPolicy.mode(
+                    paired = _stats.value.isCadenceConnected,
+                    lastSampleAtMs = lastCadenceSampleAtMs,
+                    nowMs = System.currentTimeMillis()
+                ) == CadenceSlotMode.CADENCE
+                _stats.update { it.copy(cadenceActive = active) }
             }
         }
 
@@ -469,16 +557,18 @@ class FreeRideService : Service() {
         currentHr1 = null
         currentHr2 = null
         cadenceReadings.clear()
+        paceCalculator.reset()
         gpsPointsBuffer.clear()
         _laps.update { emptyList() }
         _mapPoints.update { emptyList() }  // ⚡ Limpiar puntos del mapa
         resetLapCounters()
         resetAutoLapCounters()
-        lastLapTimeSeconds = 0
-        lastLapDistanceMeters = 0f
-        lastAutoLapTimeSeconds = 0
-        lastAutoLapDistanceMeters = 0f
-        lastAutoLapTimestamp = 0L
+        lapBook.reset(System.currentTimeMillis())
+        stepsSeen = false
+        manualWindowStartCounters = BlockCounters()
+        autoWindowStartCounters = BlockCounters()
+        autoLapTracker.reset()
+        kmAlertGate.reset()
         totalElevationGain = 0f
         previousAltitude = null
 
@@ -517,9 +607,13 @@ class FreeRideService : Service() {
                 steps = 0,
                 stepCadenceSpm = 0,
                 avgStrideM = 0f,
+                paceSecPerKm = null,
                 lapsCount = 0,
+                manualLapsCount = 0,
                 currentLapDistanceMeters = 0f,
-                currentLapTimeSeconds = 0
+                currentLapTimeSeconds = 0,
+                currentLapSteps = null,
+                currentLapElevationGainM = null
             )
         }
 
@@ -534,7 +628,8 @@ class FreeRideService : Service() {
 
         timerJob?.cancel()
         gpsManager.pause()
-        _stats.update { it.copy(isPaused = true) }
+        paceCalculator.reset()
+        _stats.update { it.copy(isPaused = true, paceSecPerKm = null) }
         updateNotification("Pausado", "Toca para continuar")
 
         Log.d(TAG, "⏸️ Ruta pausada")
@@ -560,103 +655,162 @@ class FreeRideService : Service() {
         timerJob?.cancel()
         flushGpsBuffer()
 
+        // Foto de las vueltas AHORA: el reset a idle no debe poder vaciarlas antes de guardarlas
+        val lapsToSave = _laps.value
         serviceScope.launch {
-            saveFinalStats()
+            saveFinalStats(lapsToSave)
             onSaved?.let { withContext(Dispatchers.Main) { it() } }
         }
 
         stepCounter.stop()
-        _stats.update { it.copy(isRunning = false, isPaused = false) }
+        paceCalculator.reset()
+        _stats.update { it.copy(isRunning = false, isPaused = false, paceSecPerKm = null) }
         updateNotification("Ruta Finalizada", "¡Buen trabajo!")
     }
 
     /**
-     * Añade un lap manual (presionando el botón)
-     * NO afecta el contador de auto-laps
+     * Añade una vuelta manual (botón). Independiente de las AUTO: cada serie lleva su numeración y su ventana.
+     * @return true si la vuelta se creó; false si se ignoró (parado, en pausa o demasiado corta, ver LapGuard)
      */
-    fun addLap() {
-        if (!_stats.value.isRunning) return
-
+    fun addLap(): Boolean {
         val currentStats = _stats.value
-        val lapNumber = _laps.value.size + 1
-
-        val lapDistance = currentStats.totalDistanceMeters - lastLapDistanceMeters
-        val lapTime = currentStats.totalTimeSeconds - lastLapTimeSeconds
-        val lapAvgSpeed = if (lapTime > 0) (lapDistance / 1000f) / (lapTime / 3600f) else 0f
-        val lapAvgHr = if (lastLapHrReadings.isNotEmpty()) lastLapHrReadings.average().toInt() else 0
-        val lapAvgCadence = if (lastLapCadenceReadings.isNotEmpty()) lastLapCadenceReadings.average().toFloat() else 0f
-
-        val lap = LapData(
-            number = lapNumber,
-            startTimeSeconds = lastLapTimeSeconds,
-            endTimeSeconds = currentStats.totalTimeSeconds,
-            distanceMeters = lapDistance,
-            avgSpeedKmh = lapAvgSpeed,
-            maxSpeedKmh = lastLapMaxSpeed,
-            avgHeartRate = lapAvgHr,
-            maxHeartRate = lastLapMaxHr,
-            avgCadence = lapAvgCadence,
-            isAutoLap = false  // Lap manual
-        )
-
-        _laps.update { it + lap }
-        
-        // Resetear contadores de lap manual (NO afecta auto-lap)
-        resetLapCounters()
-        lastLapTimeSeconds = currentStats.totalTimeSeconds
-        lastLapDistanceMeters = currentStats.totalDistanceMeters
-        
-        // Actualizar estado con nuevo lap y resetear tiempo del lap actual
-        _stats.update { 
-            it.copy(
-                lapsCount = lapNumber,
-                currentLapTimeSeconds = 0  // Resetear tiempo del lap actual
-            ) 
+        if (!currentStats.isRunning || currentStats.isPaused) {
+            Log.d(TAG, "addLap ignorada: isRunning=${currentStats.isRunning} isPaused=${currentStats.isPaused}")
+            return false
         }
 
-        Log.d(TAG, "🏁 LAP MANUAL $lapNumber: ${String.format("%.2f", lapDistance/1000)}km en ${formatDuration(lapTime)}")
-    }
-    
-    /**
-     * Añade un auto-lap automático cada 1 km
-     * Basado en distancia total acumulada, independiente de laps manuales
-     */
-    private fun addAutoLap() {
-        if (!_stats.value.isRunning) return
+        val now = System.currentTimeMillis()
+        val record = lapBook.addManual(currentStats.totalTimeSeconds, currentStats.totalDistanceMeters, now)
+        if (record == null) {
+            Log.d(TAG, "addLap ignorada por LapGuard (ventana de ${currentStats.totalTimeSeconds - lapBook.currentManualStartSeconds}s)")
+            return false
+        }
 
-        val currentStats = _stats.value
-        val lapNumber = _laps.value.size + 1
-
-        val lapDistance = currentStats.totalDistanceMeters - lastAutoLapDistanceMeters
-        val lapTime = currentStats.totalTimeSeconds - lastAutoLapTimeSeconds
-        val lapAvgSpeed = if (lapTime > 0) (lapDistance / 1000f) / (lapTime / 3600f) else 0f
-        val lapAvgHr = if (autoLapHrReadings.isNotEmpty()) autoLapHrReadings.average().toInt() else 0
-        val lapAvgCadence = if (autoLapCadenceReadings.isNotEmpty()) autoLapCadenceReadings.average().toFloat() else 0f
-
-        val lap = LapData(
-            number = lapNumber,
-            startTimeSeconds = lastAutoLapTimeSeconds,
-            endTimeSeconds = currentStats.totalTimeSeconds,
-            distanceMeters = lapDistance,
-            avgSpeedKmh = lapAvgSpeed,
-            maxSpeedKmh = autoLapMaxSpeed,
-            avgHeartRate = lapAvgHr,
-            maxHeartRate = autoLapMaxHr,
-            avgCadence = lapAvgCadence,
-            isAutoLap = true  // Auto-lap
+        val endCounters = currentCounters()
+        val lap = record.toLapData(
+            avgSpeedKmh = speedOf(record.distanceMeters, record.durationSeconds),
+            maxSpeedKmh = lastLapMaxSpeed,
+            hrReadings = lastLapHrReadings,
+            maxHr = lastLapMaxHr,
+            cadenceReadings = lastLapCadenceReadings,
+            metrics = LapBlockMetrics.of(manualWindowStartCounters, endCounters, lastLapCadenceReadings.isNotEmpty())
         )
-
         _laps.update { it + lap }
-        
-        // Resetear contadores de auto-lap
-        resetAutoLapCounters()
-        lastAutoLapTimeSeconds = currentStats.totalTimeSeconds
-        lastAutoLapDistanceMeters = currentStats.totalDistanceMeters
-        
-        // Actualizar estado con nuevo lap (auto-lap no resetea el tiempo del lap manual)
-        _stats.update { it.copy(lapsCount = lapNumber) }
+        resetLapCounters()   // solo la serie manual; NO afecta a las AUTO
+        manualWindowStartCounters = endCounters
 
-        Log.d(TAG, "⚡ AUTO-LAP $lapNumber: ${String.format("%.2f", lapDistance/1000)}km en ${formatDuration(lapTime)}")
+        _stats.update {
+            it.copy(
+                lapsCount = lapBook.laps.size,
+                manualLapsCount = lapBook.manualCount,
+                currentLapTimeSeconds = 0   // empieza la siguiente vuelta manual
+            )
+        }
+        updateCurrentLapBlock()
+
+        Log.d(TAG, "🏁 LAP MANUAL ${record.typeNumber}: ${String.format("%.2f", record.distanceMeters / 1000)}km en ${formatDuration(record.durationSeconds)}")
+        return true
+    }
+
+    /**
+     * Añade un auto-lap de 1 km exacto. Basado en la distancia total acumulada, independiente de las manuales.
+     */
+    private fun addAutoLap(crossing: AutoLapCrossing, resetCounters: Boolean, inGpsJump: Boolean) {
+        val record = lapBook.addAuto(crossing, System.currentTimeMillis())
+        val endCounters = currentCounters()
+        // Si un hueco de GPS cruza varios km de golpe, los pasos/desnivel no se pueden repartir entre ellos
+        // con fiabilidad: esas vueltas quedan sin dato (`--`) en vez de duplicar o inventar la cifra
+        val bikeUsed = autoLapCadenceReadings.isNotEmpty()
+        val metrics = if (inGpsJump) {
+            BlockMetrics(steps = null, elevationGain = null,
+                cadenceSource = if (bikeUsed) CadenceSource.BIKE_SENSOR else CadenceSource.NONE)
+        } else {
+            LapBlockMetrics.of(autoWindowStartCounters, endCounters, bikeUsed)
+        }
+        val lap = record.toLapData(
+            avgSpeedKmh = speedOf(record.distanceMeters, record.durationSeconds),
+            maxSpeedKmh = autoLapMaxSpeed,
+            hrReadings = autoLapHrReadings,
+            maxHr = autoLapMaxHr,
+            cadenceReadings = autoLapCadenceReadings,
+            metrics = metrics
+        )
+        _laps.update { it + lap }
+        if (resetCounters) autoWindowStartCounters = endCounters
+
+        // En un salto de varios km, los contadores (FC, vel. máx.) se reinician solo tras el último
+        if (resetCounters) resetAutoLapCounters()
+
+        // Una AUTO no toca el tiempo de la vuelta manual en curso ni el contador de manuales
+        _stats.update { it.copy(lapsCount = lapBook.laps.size) }
+
+        Log.d(TAG, "⚡ AUTO-LAP ${record.typeNumber}: ${String.format("%.2f", record.distanceMeters / 1000)}km en ${formatDuration(record.durationSeconds)}")
+    }
+
+    /** Pasos y desnivel acumulados ahora mismo; null = aún sin dato (sin podómetro / sin altitud) */
+    private fun currentCounters() = BlockCounters(
+        steps = if (stepsSeen) _stats.value.steps else null,
+        elevationGain = if (previousAltitude != null) totalElevationGain else null
+    )
+
+    /** Pasos y desnivel+ de la vuelta manual en curso = contadores de ahora − contadores al abrirla */
+    private fun updateCurrentLapBlock() {
+        val block = LapBlockMetrics.of(manualWindowStartCounters, currentCounters(), bikeSensorUsed = false)
+        _stats.update { it.copy(currentLapSteps = block.steps, currentLapElevationGainM = block.elevationGain) }
+    }
+
+    private fun speedOf(distanceMeters: Float, seconds: Int): Float =
+        if (seconds > 0) (distanceMeters / 1000f) / (seconds / 3600f) else 0f
+
+    private fun LapRecord.toLapData(
+        avgSpeedKmh: Float,
+        maxSpeedKmh: Float,
+        hrReadings: List<Int>,
+        maxHr: Int,
+        cadenceReadings: List<Float>,
+        metrics: BlockMetrics
+    ) = LapData(
+        number = order,
+        type = type,
+        typeNumber = typeNumber,
+        startTimeSeconds = startSeconds,
+        endTimeSeconds = endSeconds,
+        distanceMeters = distanceMeters,
+        startDistanceMeters = startMeters,
+        avgSpeedKmh = avgSpeedKmh,
+        maxSpeedKmh = maxSpeedKmh,
+        avgHeartRate = if (hrReadings.isNotEmpty()) hrReadings.average().toInt() else 0,
+        maxHeartRate = maxHr,
+        avgCadence = if (cadenceReadings.isNotEmpty()) cadenceReadings.average().toFloat() else 0f,
+        // avgCadence = rpm del sensor de pedal; la cadencia de carrera (ppm) se deriva de pasos y duración
+        steps = metrics.steps,
+        elevationGain = metrics.elevationGain,
+        cadenceSource = metrics.cadenceSource,
+        startTimestamp = startWallMs,
+        timestamp = endWallMs
+    )
+
+    /** Aviso de km completado: evento para el banner + sonido + vibración (una vez por km) */
+    private fun announceKm(km: Int) {
+        val lastKmLap = _laps.value.lastOrNull { it.isAutoLap }
+        val pace = lastKmLap?.let { PaceCalculator.secPerKm(it.endTimeSeconds - it.startTimeSeconds, it.distanceMeters) }
+        _kmAlerts.tryEmit(KmAlert(km, pace))
+        soundPlayer.playSound(Sound.BEEP)
+        vibrateKmAlert()
+    }
+
+    private fun vibrateKmAlert() {
+        try {
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                (getSystemService(VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                getSystemService(VIBRATOR_SERVICE) as Vibrator
+            }
+            vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 200, 100, 200), -1))
+        } catch (e: Exception) {
+            Log.w(TAG, "No se pudo vibrar: ${e.message}")
+        }
     }
 
     private fun resetLapCounters() {
@@ -679,6 +833,7 @@ class FreeRideService : Service() {
                 isGpsConnected = it.isGpsConnected,
                 isHrConnected = it.isHrConnected,
                 isCadenceConnected = it.isCadenceConnected,
+                cadenceActive = it.cadenceActive,
                 heartRate = it.heartRate,
                 cadence = it.cadence
             )
@@ -698,8 +853,8 @@ class FreeRideService : Service() {
         timerJob = serviceScope.launch {
             while (isActive && _stats.value.isRunning && !_stats.value.isPaused) {
                 delay(1000)
-                // Capturar lastLapTimeSeconds antes de actualizar para evitar race conditions
-                val lapStartTime = lastLapTimeSeconds
+                // Capturar el inicio de la vuelta manual antes de actualizar para evitar race conditions
+                val lapStartTime = lapBook.currentManualStartSeconds
                 _stats.update {
                     val newTotalTime = it.totalTimeSeconds + 1
                     it.copy(
@@ -709,6 +864,8 @@ class FreeRideService : Service() {
                 }
 
                 updateSteps()
+                updateCurrentLapBlock()
+                updatePace()
                 saveSensorReading()
 
                 if (_stats.value.totalTimeSeconds % 30 == 0) {
@@ -723,6 +880,7 @@ class FreeRideService : Service() {
     /** Suma los pasos del último segundo y recalcula pasos/min y zancada media */
     private fun updateSteps() {
         val raw = stepCounter.rawSteps.value ?: return
+        stepsSeen = true
         val delta = lastRawSteps?.let { (raw - it).toInt().coerceAtLeast(0) } ?: 0
         lastRawSteps = raw
 
@@ -738,6 +896,14 @@ class FreeRideService : Service() {
                 avgStrideM = strideOf(it.totalDistanceMeters, steps)
             )
         }
+    }
+
+    /** Ritmo en vivo (s/km) sobre los últimos 10 s en movimiento */
+    private fun updatePace() {
+        val s = _stats.value
+        paceCalculator.add(s.totalTimeSeconds, s.totalDistanceMeters)
+        val pace = paceCalculator.livePaceSecPerKm()
+        _stats.update { it.copy(paceSecPerKm = pace) }
     }
 
     /** Zancada = distancia GPS / pasos; con pocos pasos el dato no es fiable */
@@ -771,26 +937,14 @@ class FreeRideService : Service() {
             autoLapMaxSpeed = gpsStats.currentSpeedKmh
         }
 
-        // ⚡ AUTO-LAP: Verificar si se ha alcanzado un nuevo km completo
-        val currentDistanceKm = gpsStats.totalDistanceMeters / 1000f
-        val lastAutoLapDistanceKm = lastAutoLapDistanceMeters / 1000f
-        val nextAutoLapKm = (lastAutoLapDistanceKm.toInt() + 1).toFloat()
-        
-        // Protección: mínimo 2 segundos entre auto-laps para evitar duplicados
-        val timeSinceLastAutoLap = System.currentTimeMillis() - lastAutoLapTimestamp
-        val minTimeBetweenAutoLaps = 2000L // 2 segundos
-        
-        val shouldTriggerAutoLap = if (lastAutoLapDistanceMeters > 0) {
-            // Auto-laps subsecuentes: verificar km completo Y tiempo mínimo
-            currentDistanceKm >= nextAutoLapKm && timeSinceLastAutoLap >= minTimeBetweenAutoLaps
-        } else {
-            // Primer auto-lap: solo verificar distancia
-            currentDistanceKm >= 1.0f
-        }
-        
-        if (shouldTriggerAutoLap) {
-            addAutoLap()
-            lastAutoLapTimestamp = System.currentTimeMillis()
+        // ⚡ AUTO-LAP: un cruce por cada múltiplo de 1000 m, con el instante interpolado (R3)
+        val live = _stats.value
+        if (live.isRunning && !live.isPaused) {
+            val crossings = autoLapTracker.onSample(live.totalTimeSeconds.toDouble(), gpsStats.totalDistanceMeters)
+            crossings.forEachIndexed { i, crossing ->
+                addAutoLap(crossing, resetCounters = i == crossings.lastIndex, inGpsJump = crossings.size > 1)
+            }
+            kmAlertGate.alertFor(crossings.map { it.km })?.let { km -> announceKm(km) }
         }
 
         _stats.update {
@@ -804,7 +958,7 @@ class FreeRideService : Service() {
                 gpsAccuracy = reading.accuracy,
                 latitude = reading.latitude,
                 longitude = reading.longitude,
-                currentLapDistanceMeters = gpsStats.totalDistanceMeters - lastLapDistanceMeters
+                currentLapDistanceMeters = gpsStats.totalDistanceMeters - lapBook.currentManualStartMeters
             )
         }
 
@@ -895,7 +1049,7 @@ class FreeRideService : Service() {
         }
     }
 
-    private suspend fun saveFinalStats() {
+    private suspend fun saveFinalStats(lapsToSave: List<LapData>) {
         currentSessionId?.let { sessionId ->
             val stats = _stats.value
             val gpsStats = gpsManager.getCurrentStats()
@@ -927,6 +1081,19 @@ class FreeRideService : Service() {
                     )
                 )
             }
+
+            saveLaps(sessionId, lapsToSave)
+        }
+    }
+
+    /** Guarda las vueltas; si falla, la sesión ya está guardada igualmente (resiliencia) */
+    private suspend fun saveLaps(sessionId: String, lapsToSave: List<LapData>) {
+        try {
+            gpsDao.deleteLapsForSession(sessionId)   // idempotente si se finaliza dos veces
+            lapsToSave.forEach { gpsDao.insertLap(it.toEntity(sessionId)) }
+            Log.d(TAG, "💾 ${lapsToSave.size} vueltas guardadas")
+        } catch (e: Exception) {
+            Log.e(TAG, "No se pudieron guardar las vueltas: ${e.message}", e)
         }
     }
 
@@ -940,6 +1107,7 @@ class FreeRideService : Service() {
         hrCollectorJob?.cancel()
         hr2CollectorJob?.cancel()
         cadenceCollectorJob?.cancel()
+        cadenceWatchdogJob?.cancel()
         gpsCollectorJob?.cancel()
     }
 

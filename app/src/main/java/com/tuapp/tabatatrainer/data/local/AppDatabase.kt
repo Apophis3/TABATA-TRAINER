@@ -14,7 +14,7 @@ import androidx.room.RoomDatabase
         LapEntity::class,           // ← NUEVO: Vueltas/Laps
         DeviceProfileEntity::class  // ← NUEVO: Perfiles de dispositivos
     ],
-    version = 9,                    // 9: pasos y zancada del podómetro
+    version = 10,                    // 10: lap_records con type/typeNumber/steps/cadenceSource (9: pasos y zancada)
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

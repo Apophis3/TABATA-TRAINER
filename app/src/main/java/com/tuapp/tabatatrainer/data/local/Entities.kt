@@ -206,7 +206,13 @@ data class LapEntity(
     val avgHeartRate: Int?,
     val maxHeartRate: Int?,
     val avgCadence: Float?,
-    val elevationGain: Float?
+    val elevationGain: Float?,
+    // v10: serie a la que pertenece ("AUTO" | "MANUAL") y número dentro de ella; lapNumber es el orden global
+    val type: String = "MANUAL",
+    val typeNumber: Int = 0,
+    val steps: Int? = null,
+    // "PEDOMETER" | "BIKE_SENSOR" | "NONE"
+    val cadenceSource: String? = null
 )
 
 // ============================================================================

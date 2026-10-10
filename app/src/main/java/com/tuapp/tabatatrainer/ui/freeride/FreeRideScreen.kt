@@ -7,8 +7,6 @@ import android.content.ServiceConnection
 import android.content.res.Configuration
 import android.os.IBinder
 import androidx.compose.animation.core.*
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -55,6 +53,26 @@ import com.tuapp.tabatatrainer.ui.components.BatteryLowWarnings
 import com.tuapp.tabatatrainer.ui.components.rememberSensorBatteries
 import com.tuapp.tabatatrainer.ui.theme.TabataColors
 import com.tuapp.tabatatrainer.ui.theme.TabataSizes
+import com.tuapp.tabatatrainer.util.laps.CadenceDisplayPolicy
+import com.tuapp.tabatatrainer.util.laps.CurrentLapModel
+import com.tuapp.tabatatrainer.util.laps.KmAlert
+import com.tuapp.tabatatrainer.util.laps.LastManualLap
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
+
+/** Ventana tras pulsar Iniciar en la que se ignora el toque de Vuelta (rebote del dedo, R2) */
+private const val LAP_TAP_GUARD_AFTER_START_MS = 1000L
+
+/** Tiempo que el banner de km completado permanece en pantalla (R3) */
+private const val KM_BANNER_MILLIS = 4000L
+
+/** Ventanas del pager (R8): 1 Métricas · 2 Mapa · 3 Vueltas resumida · 4 Tabla de vueltas */
+private const val PAGE_METRICS = 0
+private const val PAGE_MAP = 1
+private const val PAGE_LAPS = 2
+private const val PAGE_TABLE = 3
+private const val PAGE_COUNT = 4
 
 // ============================================================================
 // PANTALLA PRINCIPAL FREE RIDE
@@ -79,7 +97,18 @@ fun FreeRideScreen(
     val laps by service?.laps?.collectAsState() ?: remember { mutableStateOf(emptyList<LapData>()) }
     val mapPoints by service?.mapPoints?.collectAsState() ?: remember { mutableStateOf(emptyList<MapPoint>()) }
 
-    val pagerState = rememberPagerState(pageCount = { 3 })
+    val pagerState = rememberPagerState(pageCount = { PAGE_COUNT })
+    val pagerScope = rememberCoroutineScope()
+
+    // R3: banner "KM 3 · 5:42/km" al completar cada kilómetro (el sonido y la vibración los pone el servicio)
+    var kmBanner by remember { mutableStateOf<KmAlert?>(null) }
+    LaunchedEffect(service) {
+        service?.kmAlerts?.collectLatest { alert ->
+            kmBanner = alert
+            delay(KM_BANNER_MILLIS)
+            kmBanner = null
+        }
+    }
 
     val connection = remember {
         object : ServiceConnection {
@@ -109,14 +138,25 @@ fun FreeRideScreen(
     }
 
     // Callbacks
-    val onStart: () -> Unit = { service?.startRide() }
+    // R2: el botón Vuelta aparece bajo el dedo justo donde estaba Iniciar; un toque
+    // en el primer segundo tras iniciar es el rebote del mismo dedo, no una vuelta.
+    val lastStartAtMs = remember { longArrayOf(0L) }
+    val onStart: () -> Unit = {
+        lastStartAtMs[0] = android.os.SystemClock.elapsedRealtime()
+        service?.startRide()
+    }
     val onPause: () -> Unit = { service?.pauseRide() }
     val onResume: () -> Unit = { service?.resumeRide() }
     val onStop: () -> Unit = {
         val id = stats.sessionId
         service?.stopRide(onSaved = { id?.let { onViewSession(it) } })
     }
-    val onLap: () -> Unit = { service?.addLap() }
+    val onLap: () -> Unit = onLap@{
+        if (android.os.SystemClock.elapsedRealtime() - lastStartAtMs[0] < LAP_TAP_GUARD_AFTER_START_MS) return@onLap
+        if (service?.addLap() == false) {
+            android.widget.Toast.makeText(context, "Vuelta ignorada: dura menos de 5 s", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
     val onReconnect: () -> Unit = { service?.reconnectSensors() }
 
     val backgroundGradient = Brush.verticalGradient(
@@ -128,37 +168,76 @@ fun FreeRideScreen(
             .fillMaxSize()
             .background(backgroundGradient)
     ) {
-        // Tanto en Portrait como Landscape: 3 páginas con swipe
+        // Tanto en Portrait como Landscape: 4 páginas con swipe
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxSize()
         ) { page ->
             when (page) {
-                0 -> {
+                PAGE_METRICS -> {
                     if (isLandscape) {
                         LandscapeMetricsPage(stats, laps, onStart, onPause, onResume, onStop, onLap, onReconnect)
                     } else {
                         MetricsPage(stats, onStart, onPause, onResume, onStop, onLap, onReconnect)
                     }
                 }
-                1 -> MapPage(stats, mapPoints, onPause, onResume)
-                2 -> {
+                PAGE_MAP -> MapPage(stats, mapPoints, onPause, onResume)
+                PAGE_LAPS -> {
                     if (isLandscape) {
                         LandscapeLapsPage(stats, laps, onStart, onPause, onResume, onStop, onLap)
                     } else {
                         LapsPage(stats, laps, onLap)
                     }
                 }
+                PAGE_TABLE -> LapTablePage(laps)
             }
         }
 
-        // Indicadores de página
+        // Indicadores de página (pulsables: salto a la ventana en un toque)
         PageIndicatorBar(
             currentPage = pagerState.currentPage,
+            onSelect = { index -> pagerScope.launch { pagerState.animateScrollToPage(index) } },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 16.dp)
         )
+
+        // R8 (RF-8.5): botón de vuelta manual siempre al alcance. Las ventanas 1 y 3 ya traen el suyo;
+        // el flotante cubre las ventanas Mapa y Tabla, que no tienen botón de vuelta propio.
+        val showFloatingLap = stats.isRunning && !stats.isPaused &&
+            (pagerState.currentPage == PAGE_MAP || pagerState.currentPage == PAGE_TABLE)
+        if (showFloatingLap) {
+            FloatingActionButton(
+                onClick = onLap,
+                containerColor = Color(0xFFFFD700),
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(start = 12.dp, bottom = if (pagerState.currentPage == PAGE_MAP) 100.dp else 12.dp)
+            ) {
+                Icon(Icons.Default.Flag, "Vuelta", tint = Color.Black)
+            }
+        }
+
+        // Banner de km completado
+        kmBanner?.let { alert ->
+            Surface(
+                color = Color(0xFFFFD700),
+                shape = RoundedCornerShape(24.dp),
+                shadowElevation = 6.dp,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = 12.dp)
+            ) {
+                Text(
+                    text = alert.bannerText(),
+                    color = Color.Black,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 22.sp,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp)
+                )
+            }
+        }
 
         // Botón volver
         IconButton(
@@ -240,12 +319,7 @@ private fun MetricsPage(
                     valueColor = if (stats.isHrConnected) Color(0xFFE91E63) else Color.Gray,
                     modifier = Modifier.weight(1f)
                 )
-                LapMetricCardNoIcon(
-                    value = if (stats.cadence > 0) String.format("%.0f", stats.cadence) else "--",
-                    unit = "rpm",
-                    label = "Cadencia",
-                    modifier = Modifier.weight(1f)
-                )
+                CadencePaceCard(stats, Modifier.weight(1f))
             }
             // Podómetro del móvil: solo si hay pasos (franja compacta para que quepa)
             if (stats.steps > 0) StepsStrip(stats)
@@ -511,69 +585,37 @@ private fun OverlayMetric(value: String, unit: String, label: String) {
 
 @Composable
 private fun LapsPage(stats: FreeRideStats, laps: List<LapData>, onLap: () -> Unit) {
-    var isLapHistoryExpanded by remember { mutableStateOf(false) }
-    
+    val lastManual = remember(laps) { CurrentLapModel.lastManual(laps) }
+
+    // Panel de la vuelta manual en curso (RF-8.7). El historial completo vive en la ventana 4.
     Column(
         modifier = Modifier
             .fillMaxSize()
             .systemBarsPadding()
-            .padding(TabataSizes.PaddingMedium)
+            .verticalScroll(rememberScrollState())
+            .padding(TabataSizes.PaddingMedium),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // ============================================================
-        // 1. DATOS SIEMPRE VISIBLES (SIN ICONOS, FORMATO PÁGINA 1)
-        // ============================================================
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // Fila 1: Nº Vuelta y HR (intercambiado: HR ahora en top-right)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                LapMetricCardNoIcon(
-                    value = "${laps.size + 1}",
-                    unit = "",
-                    label = "Vuelta",
-                    valueColor = TabataColors.VibrantOrange,
-                    modifier = Modifier.weight(1f)
-                )
-                LapMetricCardNoIcon(
-                    value = if (stats.heartRate > 0) "${stats.heartRate}" else "--",
-                    unit = "bpm",
-                    label = "HR",
-                    valueColor = if (stats.isHrConnected) Color(0xFFE91E63) else Color.Gray,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-            
-            // Fila 2: Distancia y Velocidad
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                LapMetricCardNoIcon(
-                    value = String.format("%.2f", stats.currentLapDistanceMeters / 1000f),
-                    unit = "km",
-                    label = "Distancia",
-                    modifier = Modifier.weight(1f)
-                )
-                LapMetricCardNoIcon(
-                    value = if (stats.currentSpeedKmh > 0.5f) String.format("%.1f", stats.currentSpeedKmh) else "--",
-                    unit = "km/h",
-                    label = "Velocidad",
-                    modifier = Modifier.weight(1f)
-                )
-            }
-            
-            // Fila 3: Tiempo (OCUPA TODA LA FILA - ancho completo)
-            LapMetricCardNoIcon(
-                value = formatDuration(stats.currentLapTimeSeconds),
-                unit = "",
-                label = "Tiempo",
-                modifier = Modifier.fillMaxWidth()
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Flag, null, tint = TabataColors.VibrantOrange, modifier = Modifier.size(22.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                "Vuelta manual M${stats.manualLapsCount + 1}",
+                color = TabataColors.VibrantOrange,
+                fontWeight = FontWeight.Bold,
+                fontSize = 20.sp
             )
         }
 
-        Spacer(modifier = Modifier.height(48.dp))
+        LapStatGrid(
+            stats = currentLapStats(stats),
+            columns = 2,
+            valueFontSize = 36.sp,
+            cardPadding = 10.dp,
+            spacing = 10.dp
+        )
 
-        // ============================================================
-        // 2. BOTÓN NUEVA VUELTA
-        // ============================================================
+        // Botón NUEVA VUELTA
         if (stats.isRunning && !stats.isPaused) {
             Button(
                 onClick = onLap,
@@ -589,140 +631,103 @@ private fun LapsPage(stats: FreeRideStats, laps: List<LapData>, onLap: () -> Uni
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        LastLapStrip(lastManual, compact = false)
+    }
+}
 
-        // ============================================================
-        // 3. DESPLEGABLE CON HISTORIAL DE VUELTAS (SCROLLABLE)
-        // ============================================================
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.3f)),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Column {
-                // Header clickeable
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { isLapHistoryExpanded = !isLapHistoryExpanded }
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "Historial de Vueltas",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        letterSpacing = 1.sp
-                    )
-                    Icon(
-                        if (isLapHistoryExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                        contentDescription = if (isLapHistoryExpanded) "Contraer" else "Expandir",
-                        tint = Color.White
+/** Un dato de la rejilla de la vuelta en curso */
+private data class LapStat(val value: String, val unit: String, val label: String, val color: Color = Color.White)
+
+/** Datos de la vuelta manual en curso, en el orden de lectura: tiempo, distancia, ritmo, velocidad, FC, pasos, cadencia, desnivel+ */
+private fun currentLapStats(stats: FreeRideStats): List<LapStat> {
+    val lap = CurrentLapModel.of(
+        lapSeconds = stats.currentLapTimeSeconds,
+        lapMeters = stats.currentLapDistanceMeters,
+        lapSteps = stats.currentLapSteps,
+        lapElevationGainM = stats.currentLapElevationGainM,
+        cadenceActive = stats.cadenceActive,
+        cadenceRpm = stats.cadence
+    )
+    return listOf(
+        LapStat(formatDuration(stats.currentLapTimeSeconds), "", "Tiempo"),
+        LapStat(String.format("%.2f", stats.currentLapDistanceMeters / 1000f), "km", "Distancia"),
+        LapStat(lap.pace, "min/km", "Ritmo vuelta"),
+        LapStat(if (stats.currentSpeedKmh > 0.5f) String.format("%.1f", stats.currentSpeedKmh) else "--", "km/h", "Velocidad"),
+        LapStat(
+            if (stats.heartRate > 0) "${stats.heartRate}" else "--", "bpm", "HR",
+            if (stats.isHrConnected) Color(0xFFE91E63) else Color.Gray
+        ),
+        LapStat(lap.steps, "", "Pasos"),
+        LapStat(lap.cadenceValue, lap.cadenceUnit, "Cadencia"),
+        LapStat(lap.elevation, "m", "Desnivel +")
+    )
+}
+
+@Composable
+private fun LapStatGrid(
+    stats: List<LapStat>,
+    columns: Int,
+    valueFontSize: TextUnit,
+    cardPadding: androidx.compose.ui.unit.Dp,
+    spacing: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(spacing)) {
+        stats.chunked(columns).forEach { rowStats ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(spacing)) {
+                rowStats.forEach { s ->
+                    LapMetricCardNoIcon(
+                        value = s.value,
+                        unit = s.unit,
+                        label = s.label,
+                        valueColor = s.color,
+                        valueFontSize = valueFontSize,
+                        contentPadding = cardPadding,
+                        modifier = Modifier.weight(1f)
                     )
                 }
+                repeat(columns - rowStats.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
 
-                // Contenido expandible con scroll
-                androidx.compose.animation.AnimatedVisibility(
-                    visible = isLapHistoryExpanded,
-                    enter = expandVertically(animationSpec = tween(300)),
-                    exit = shrinkVertically(animationSpec = tween(300))
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 400.dp)
-                    ) {
-                        if (laps.isNotEmpty()) {
-                            // Header de la tabla
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(Color.White.copy(alpha = 0.1f), RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
-                                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                            ) {
-                                Text("#", Modifier.width(30.dp), color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
-                                Text("Tiempo", Modifier.weight(1f), color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
-                                Text("Dist.", Modifier.weight(1f), color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
-                                Text("Vel.", Modifier.weight(1f), color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
-                                Text("HR", Modifier.weight(1f), color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
-                            }
-
-                            // Lista scrollable de vueltas
-                            LazyColumn(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(max = 350.dp)
-                            ) {
-                                items(laps.reversed()) { lap ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .background(if (lap.number % 2 == 0) Color.Black.copy(alpha = 0.2f) else Color.Transparent)
-                                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.width(50.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                        ) {
-                                            Text(
-                                                text = "${lap.number}",
-                                                color = if (lap.isAutoLap) TabataColors.WorkGreen else TabataColors.VibrantOrange,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 14.sp
-                                            )
-                                            if (lap.isAutoLap) {
-                                                Text(
-                                                    text = "⚡",
-                                                    fontSize = 10.sp
-                                                )
-                                            }
-                                        }
-
-                                        Text(
-                                            text = formatDuration((lap.endTimeSeconds - lap.startTimeSeconds)),
-                                            modifier = Modifier.weight(1f),
-                                            color = Color.White,
-                                            fontSize = 14.sp
-                                        )
-
-                                        Text(
-                                            text = String.format("%.2f", lap.distanceMeters / 1000f),
-                                            modifier = Modifier.weight(1f),
-                                            color = Color.White,
-                                            fontSize = 14.sp
-                                        )
-                                        Text(
-                                            String.format("%.1f", lap.avgSpeedKmh),
-                                            Modifier.weight(1f),
-                                            color = Color.White,
-                                            fontSize = 14.sp
-                                        )
-                                        Text(
-                                            if (lap.avgHeartRate > 0) "${lap.avgHeartRate}" else "--",
-                                            Modifier.weight(1f),
-                                            color = Color.White,
-                                            fontSize = 14.sp
-                                        )
-                                    }
-                                }
-                            }
-                        } else {
-                            Text(
-                                "No hay vueltas registradas",
-                                color = Color.White.copy(alpha = 0.5f),
-                                fontSize = 14.sp,
-                                modifier = Modifier.padding(16.dp)
-                            )
-                        }
-                    }
+/** Franja con el resumen de la última vuelta manual cerrada; sin ninguna, un aviso */
+@Composable
+private fun LastLapStrip(last: LastManualLap?, compact: Boolean) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.3f)),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(Modifier.fillMaxWidth().padding(vertical = 8.dp, horizontal = 8.dp)) {
+            if (last == null) {
+                Text(
+                    "Última vuelta: aún no has cerrado ninguna vuelta manual",
+                    color = Color.White.copy(alpha = 0.5f),
+                    fontSize = if (compact) 12.sp else 14.sp
+                )
+                return@Column
+            }
+            Text(
+                "Última vuelta · ${last.label}",
+                color = Color(0xFFFFB74D),
+                fontWeight = FontWeight.Bold,
+                fontSize = if (compact) 12.sp else 14.sp,
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+            val items = listOf(
+                Triple(last.time, "", "Tiempo"),
+                Triple(last.pace, "", "Ritmo"),
+                Triple(last.heartRate, "", "FC"),
+                Triple(last.steps, "", "Pasos")
+            )
+            items.chunked(if (compact) 2 else 4).forEach { rowItems ->
+                Row(Modifier.fillMaxWidth()) {
+                    rowItems.forEach { (v, u, l) -> StepsStripItem(v, u, l, Modifier.weight(1f)) }
                 }
             }
         }
-
     }
 }
 
@@ -753,6 +758,21 @@ private fun StepsStripItem(value: String, unit: String, label: String, modifier:
     }
 }
 
+/**
+ * Hueco "Cadencia / Ritmo": cadencia del sensor (rpm) mientras emite; si no hay sensor
+ * o deja de emitir, ritmo en min/km. La conmutación sale de [FreeRideStats.cadenceActive].
+ */
+@Composable
+private fun CadencePaceCard(stats: FreeRideStats, modifier: Modifier = Modifier) {
+    val slot = CadenceDisplayPolicy.slot(stats.cadenceActive, stats.cadence, stats.paceSecPerKm)
+    LapMetricCardNoIcon(
+        value = slot.value,
+        unit = slot.unit,
+        label = slot.label,
+        modifier = modifier
+    )
+}
+
 @Composable
 private fun LapMetricCardNoIcon(
     value: String,
@@ -760,6 +780,7 @@ private fun LapMetricCardNoIcon(
     label: String,
     valueColor: Color = Color.White,
     valueFontSize: TextUnit = 55.sp,  // ⚡ Tamaño de fuente configurable
+    contentPadding: androidx.compose.ui.unit.Dp = 16.dp,
     modifier: Modifier = Modifier
 ) {
     // ⚡ SIN ICONOS - DATOS MÁS GRANDES (formato página 1 sin iconos)
@@ -771,7 +792,7 @@ private fun LapMetricCardNoIcon(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),  // ⚡ Más padding para datos más grandes
+                .padding(contentPadding),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // ⚡ SIN ICONO - Eliminado completamente para hacer datos más grandes
@@ -895,12 +916,7 @@ private fun LandscapeMetricsPage(
                     valueColor = if (stats.isHrConnected) Color(0xFFE91E63) else Color.Gray,
                     modifier = Modifier.weight(1f)
                 )
-                LapMetricCardNoIcon(
-                    value = if (stats.cadence > 0) String.format("%.0f", stats.cadence) else "--",
-                    unit = "rpm",
-                    label = "Cadencia",
-                    modifier = Modifier.weight(1f)
-                )
+                CadencePaceCard(stats, Modifier.weight(1f))
             }
             if (stats.steps > 0) {
                 Spacer(modifier = Modifier.height(12.dp))
@@ -921,8 +937,8 @@ private fun LandscapeLapsPage(
     onStop: () -> Unit,
     onLap: () -> Unit
 ) {
-    var isLapHistoryExpanded by remember { mutableStateOf(false) }
-    
+    val lastManual = remember(laps) { CurrentLapModel.lastManual(laps) }
+
     Row(
         modifier = Modifier
             .fillMaxSize()
@@ -930,14 +946,14 @@ private fun LandscapeLapsPage(
             .padding(8.dp)
     ) {
         // ============================================================
-        // IZQUIERDA: Timer y Historial (35%)
+        // IZQUIERDA: Timer total y última vuelta manual (35%)
         // ============================================================
         Column(
             modifier = Modifier
                 .weight(0.35f)
                 .fillMaxHeight(),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             // Sensores compactos
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -952,194 +968,43 @@ private fun LandscapeLapsPage(
             // Timer grande (tiempo total)
             Text(
                 formatDuration(stats.totalTimeSeconds),
-                fontSize = 70.sp,
+                fontSize = 56.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White
             )
 
-            // Desplegable Historial de Vueltas
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.3f)),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Column {
-                    // Header clickeable
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { isLapHistoryExpanded = !isLapHistoryExpanded }
-                            .padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "Historial de Vueltas",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Icon(
-                            if (isLapHistoryExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-
-                    // Contenido expandible con scroll
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = isLapHistoryExpanded,
-                        enter = expandVertically(animationSpec = tween(300)),
-                        exit = shrinkVertically(animationSpec = tween(300))
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
-                        ) {
-                            if (laps.isNotEmpty()) {
-                                // Header de la tabla
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(Color.White.copy(alpha = 0.1f), RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
-                                        .padding(horizontal = 8.dp, vertical = 6.dp)
-                                ) {
-                                    Text("#", Modifier.width(25.dp), color = Color.White.copy(alpha = 0.7f), fontSize = 10.sp)
-                                    Text("Tiempo", Modifier.weight(1f), color = Color.White.copy(alpha = 0.7f), fontSize = 10.sp)
-                                    Text("Dist.", Modifier.weight(1f), color = Color.White.copy(alpha = 0.7f), fontSize = 10.sp)
-                                    Text("Vel.", Modifier.weight(1f), color = Color.White.copy(alpha = 0.7f), fontSize = 10.sp)
-                                    Text("HR", Modifier.weight(1f), color = Color.White.copy(alpha = 0.7f), fontSize = 10.sp)
-                                }
-
-                                // Lista scrollable de vueltas
-                                LazyColumn(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .weight(1f)
-                                ) {
-                                    items(laps.reversed()) { lap ->
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .background(if (lap.number % 2 == 0) Color.Black.copy(alpha = 0.2f) else Color.Transparent)
-                                                .padding(horizontal = 8.dp, vertical = 6.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Row(
-                                                modifier = Modifier.width(40.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(3.dp)
-                                            ) {
-                                                Text(
-                                                    text = "${lap.number}",
-                                                    color = if (lap.isAutoLap) TabataColors.WorkGreen else TabataColors.VibrantOrange,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 12.sp
-                                                )
-                                                if (lap.isAutoLap) {
-                                                    Text(
-                                                        text = "⚡",
-                                                        fontSize = 9.sp
-                                                    )
-                                                }
-                                            }
-                                            Text(
-                                                text = formatDuration((lap.endTimeSeconds - lap.startTimeSeconds)),
-                                                modifier = Modifier.weight(1f),
-                                                color = Color.White,
-                                                fontSize = 11.sp
-                                            )
-                                            Text(
-                                                text = String.format("%.2f", lap.distanceMeters / 1000f),
-                                                modifier = Modifier.weight(1f),
-                                                color = Color.White,
-                                                fontSize = 11.sp
-                                            )
-                                            Text(
-                                                String.format("%.1f", lap.avgSpeedKmh),
-                                                Modifier.weight(1f),
-                                                color = Color.White,
-                                                fontSize = 11.sp
-                                            )
-                                            Text(
-                                                if (lap.avgHeartRate > 0) "${lap.avgHeartRate}" else "--",
-                                                Modifier.weight(1f),
-                                                color = Color.White,
-                                                fontSize = 11.sp
-                                            )
-                                        }
-                                    }
-                                }
-                            } else {
-                                Text(
-                                    "No hay vueltas",
-                                    color = Color.White.copy(alpha = 0.5f),
-                                    fontSize = 12.sp,
-                                    modifier = Modifier.padding(12.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+            // Resumen de la última vuelta manual cerrada (el historial completo está en la ventana 4)
+            LastLapStrip(lastManual, compact = true)
         }
 
         // ============================================================
-        // DERECHA: Métricas de vuelta actual y controles (65%)
+        // DERECHA: Panel de la vuelta manual en curso y controles (65%)
         // ============================================================
         Column(
             modifier = Modifier
                 .weight(0.65f)
                 .fillMaxHeight()
                 .padding(start = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Fila superior: HR, Cadencia, Vuelta (3 tarjetas) - INTERCAMBIADAS
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                LapMetricCardNoIcon(
-                    value = if (stats.heartRate > 0) "${stats.heartRate}" else "--",
-                    unit = "bpm",
-                    label = "HR",
-                    valueColor = if (stats.isHrConnected) Color(0xFFE91E63) else Color.Gray,
-                    modifier = Modifier.weight(1f)
-                )
-                LapMetricCardNoIcon(
-                    value = if (stats.cadence > 0) String.format("%.0f", stats.cadence) else "--",
-                    unit = "rpm",
-                    label = "Cadencia",
-                    modifier = Modifier.weight(1f)
-                )
-                LapMetricCardNoIcon(
-                    value = "${laps.size + 1}",
-                    unit = "",
-                    label = "Vuelta",
-                    valueColor = TabataColors.VibrantOrange,
-                    valueFontSize = 40.sp,  // ⚡ Tamaño más pequeño para "Vuelta"
-                    modifier = Modifier.weight(1f)
+            Text(
+                "Vuelta manual M${stats.manualLapsCount + 1}",
+                color = TabataColors.VibrantOrange,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp
+            )
+
+            // Rejilla 3x3; si no cupiera (pantallas bajas) se desplaza en vertical
+            Box(modifier = Modifier.weight(1f)) {
+                LapStatGrid(
+                    stats = currentLapStats(stats),
+                    columns = 3,
+                    valueFontSize = 26.sp,
+                    cardPadding = 6.dp,
+                    spacing = 6.dp,
+                    modifier = Modifier.verticalScroll(rememberScrollState())
                 )
             }
-
-            // Fila media: Velocidad, Distancia (2 tarjetas) - INTERCAMBIADAS
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                LapMetricCardNoIcon(
-                    value = if (stats.currentSpeedKmh > 0.5f) String.format("%.1f", stats.currentSpeedKmh) else "--",
-                    unit = "km/h",
-                    label = "Velocidad",
-                    modifier = Modifier.weight(1f)
-                )
-                LapMetricCardNoIcon(
-                    value = String.format("%.2f", stats.currentLapDistanceMeters / 1000f),
-                    unit = "km",
-                    label = "Distancia",
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Spacer(modifier = Modifier.weight(1f))
 
             // Botón Nueva Vuelta
             if (stats.isRunning && !stats.isPaused) {
@@ -1147,7 +1012,7 @@ private fun LandscapeLapsPage(
                     onClick = onLap,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(56.dp),
+                        .height(48.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700)),
                     shape = RoundedCornerShape(12.dp)
                 ) {
@@ -1381,18 +1246,46 @@ private fun FreeRideControlsCompact(
     }
 }
 
+/**
+ * PÁGINA 4: TABLA DE VUELTAS (R8). Misma composición en portrait y landscape; el hueco inferior deja libres la barra
+ * de pestañas y el botón de vuelta flotante, y el superior la flecha de volver.
+ */
 @Composable
-private fun PageIndicatorBar(currentPage: Int, modifier: Modifier = Modifier) {
-    val labels = listOf("Métricas", "Mapa", "Vueltas")
-    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        repeat(3) { index ->
+private fun LapTablePage(laps: List<LapData>) {
+    val autos = laps.count { it.isAutoLap }
+    val manuals = laps.size - autos
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .systemBarsPadding()
+            .padding(start = 8.dp, end = 8.dp, top = 48.dp, bottom = 76.dp)
+    ) {
+        Text(
+            text = "Vueltas · ${laps.size} (A $autos · M $manuals)",
+            color = Color.White,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)
+        )
+        LapTable(laps = laps, modifier = Modifier.fillMaxWidth().weight(1f))
+    }
+}
+
+@Composable
+private fun PageIndicatorBar(currentPage: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
+    val labels = listOf("Métricas", "Mapa", "Vueltas", "Tabla")
+    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        repeat(PAGE_COUNT) { index ->
             val isSelected = currentPage == index
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
                 modifier = Modifier
                     .clip(RoundedCornerShape(12.dp))
                     .background(if (isSelected) Color.White.copy(alpha = 0.2f) else Color.Transparent)
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .clickable(onClickLabel = labels[index]) { onSelect(index) }
+                    .defaultMinSize(minWidth = 40.dp, minHeight = 40.dp)
+                    .padding(horizontal = 8.dp, vertical = 6.dp)
             ) {
                 Box(
                     modifier = Modifier
