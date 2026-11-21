@@ -37,9 +37,12 @@ Documento para continuar en un hilo nuevo. Pegar en el hilo nuevo:
    - Salir de las pantallas con sensores 20–30 s y volver → HR1/HR2 no se intercambian.
 3. Aportar el Logcat / resultado de tests; validar y marcar T-02 `[x]`.
 
-## Preguntas abiertas
-- ¿La hoja "Dispositivos" se abre también tocando HR1/HR2/C1/C2 en Tabata (además de Home)? El usuario lo
-  esperaba así; apuntarlo en `spec.md` (R8) antes de T-06.
+## Decisiones posteriores
+- **R8.1–R8.3 (2026-11-21):** la hoja "Dispositivos" se abre tocando la barra de sensores en **todas** las
+  pantallas que la tienen (Home, Tabata, Ruta Libre también en marcha, Config). Barra común `SensorBar`; la
+  flecha de refrescar sigue reconectando; abrir la hoja no para la sesión. Va en T-06.
+
+## Pendiente
 - Fallo visual conocido: la flecha de volver tapa el chip HR1 en Tabata → se arregla en T-04.
 
 ## Reglas que no hay que olvidar

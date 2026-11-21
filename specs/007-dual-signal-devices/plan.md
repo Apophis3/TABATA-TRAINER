@@ -58,11 +58,19 @@
   ciclo de vida. El cambio está en el hub: al quedarse sin observadores no borra `slotGroup` hasta pasado un
   margen largo (p. ej. 60 s), de modo que navegar Home → Tabata → Home no reparte de nuevo los huecos.
   Riesgo: radios activas unos segundos más sin pantalla; se acota con el margen y con `restart()` manual.
-- `NavGraph.kt` no se toca: la hoja "Dispositivos" es un `ModalBottomSheet` dentro de Home.
+- `NavGraph.kt` no se toca: la hoja "Dispositivos" es un `ModalBottomSheet` dentro de cada pantalla que la
+  abre (Home, Tabata, Ruta, Config); no es un destino de navegación.
+- Abrir la hoja en Tabata/Ruta con la sesión en marcha no toca el servicio: la hoja solo observa los hubs y
+  escribe en el registro (que el asignador lee en el siguiente tick). Con la hoja abierta hay observadores,
+  así que las radios no se paran.
 
-### 6. Hoja "Dispositivos" (Home) — `ui/devices/DevicesSheet.kt` + ViewModel
+### 6. Hoja "Dispositivos" (común) — `ui/devices/DevicesSheet.kt` + `DevicesViewModel` (Hilt)
 - Señales visibles (ANT+ nº / BLE MAC, valor en vivo) y aparatos guardados, por tipo.
-- Unir, separar, renombrar, asignar hueco, olvidar. Modo guiado: con 1 ANT+ y 1 BLE nuevos ofrece unirlos.
+- Unir, separar, renombrar, asignar hueco, olvidar, reconectar. Modo guiado: con 1 ANT+ y 1 BLE nuevos ofrece
+  unirlos.
+- Entrada común (R8.1): componente `SensorBar` en `ui/components/` (GPS opcional, HR1/HR2, C1/C2 con
+  `SensorSlotBadge`, batería, flecha de refrescar) con `onOpenDevices`. Lo usan Home, Tabata, Ruta y Config
+  en lugar de sus barras propias. La flecha llama a reconectar; el resto de la barra abre la hoja.
 
 ### 7. Pantallas
 - `ui/components/SensorSlotBadge.kt`: HR1/HR2/C1/C2 + insignia ANT+/BLE + batería (reutiliza `ProtocolBadge`).
@@ -71,7 +79,8 @@
 
 ## Archivos
 - Nuevos: `sensor/SensorDeviceRegistry.kt`, `sensor/PairingPolicy.kt`, `sensor/DualSlotAllocator.kt`,
-  `sensor/CadenceHub.kt`, `ui/components/SensorSlotBadge.kt`, `ui/devices/DevicesSheet.kt` (+ ViewModel),
+  `sensor/CadenceHub.kt`, `ui/components/SensorSlotBadge.kt`, `ui/components/SensorBar.kt`,
+  `ui/devices/DevicesSheet.kt` (+ ViewModel),
   tests en `app/src/test/.../sensor/`.
 - Modificados: `sensor/HeartRateHub.kt`, `sensor/SensorManager.kt`, `service/FreeRideService.kt`,
   `ui/freeride/FreeRideScreen.kt`, `ui/home/HomeScreen.kt`, `ui/workout/WorkoutScreen.kt`,

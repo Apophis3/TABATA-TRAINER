@@ -17,6 +17,8 @@ usuario confirme la anterior con evidencia. El agente **no** ejecuta Gradle ni `
   `createCadenceFlow*` y `BleManagers.kt`. Tests de cadencia con el asignador.
 - [ ] T-04 **Hueco y señal en Tabata y Config.** `SensorSlotBadge`; Tabata lee `SlotStatus`; Config HR1/HR2/C1/C2.
 - [ ] T-05 **Ruta Libre separada.** HR1/HR2 y C1/C2 con señal; medias HR1/HR2 separadas; escucha C2.
-- [ ] T-06 **Home + hoja "Dispositivos".** Estado real por hueco; unir/separar/renombrar/hueco/olvidar/guiado.
+- [ ] T-06 **Hoja "Dispositivos" común + Home.** Estado real por hueco en Home; hoja con
+  unir/separar/renombrar/hueco/olvidar/reconectar/guiado; barra de sensores común `SensorBar` que abre la hoja
+  al tocarla en Home, Tabata, Ruta (también en marcha) y Config (R8.1–R8.3); la flecha sigue reconectando.
 - [ ] T-07 **Validación real (usuario).** Una banda dual; dos bandas; cadenciómetro dual; caída/vuelta ANT+.
   Logcat `💓` / `🚴`.

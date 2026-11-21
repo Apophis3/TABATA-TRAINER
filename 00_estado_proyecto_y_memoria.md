@@ -28,8 +28,15 @@ con T-02. Pregunta abierta: abrir la hoja también tocando HR1/HR2/C1/C2 en Taba
 
 ### Pendiente
 - Usuario: compilar, pasar la suite de tests y prueba real (Logcat `💓`): dos bandas encendiendo antes los
-  BLE; Home → Tabata → Home sin que cambien los huecos.
-- Los cambios de la spec 006 siguen sin confirmar en `spec-006-outdoor-laps`.
+  BLE; una banda dual en reposo solo en HR1; salir 20–30 s de las pantallas con sensores sin que cambien los
+  huecos.
+
+### Después (misma fecha)
+- Commits: spec 006 T-11 en `spec-006-outdoor-laps`; spec 007 T-01/T-02 en la rama nueva
+  `spec-007-dual-signal-devices`. Traspaso para hilo nuevo en `specs/007-dual-signal-devices/traspaso.md`.
+- Decisión del usuario (R8.1–R8.3 en la spec): la hoja "Dispositivos" se abre tocando la barra de sensores en
+  todas las pantallas (Home, Tabata, Ruta también en marcha, Config) con una barra común `SensorBar`; la
+  flecha de refrescar sigue reconectando. Va en T-06.
 
 ---
 

@@ -34,8 +34,16 @@ quedan fallos:
   ve qué hueco es (HR1/HR2, C1/C2) y por qué señal llega (ANT+ verde / BLE azul), con su batería.
 - **R7 — Ruta Libre separada.** HR1/HR2 y C1/C2 por separado, como en Tabata; medias de HR1 y HR2 separadas.
   C2 en Ruta solo en vivo (guardarlo exige cambiar Room → otra spec).
-- **R8 — Gestión manual.** Hoja "Dispositivos" al tocar el bloque de sensores de Home: ver señales visibles y
-  aparatos guardados; unir, separar, renombrar, asignar hueco, olvidar; modo guiado "enciende solo un aparato".
+- **R8 — Gestión manual.** Hoja "Dispositivos": ver señales visibles y aparatos guardados; unir, separar,
+  renombrar, asignar hueco, olvidar; modo guiado "enciende solo un aparato".
+  - **R8.1 — Misma entrada en todas las pantallas** *(decisión del usuario 2026-11-21 tras probar T-01)*: la
+    hoja se abre al tocar la barra/bloque de sensores (GPS, HR1/HR2, C1/C2, batería) en **toda** pantalla que
+    la tenga: Home, Tabata, Ruta Libre (también con la actividad en marcha) y Config si la muestra. Es la
+    misma hoja en todas, con el mismo comportamiento.
+  - **R8.2** — La flecha de refrescar conserva su función (reconectar sensores); el resto de la barra abre la
+    hoja. La hoja incluye también "Reconectar".
+  - **R8.3** — Abrir o cerrar la hoja no para ni reinicia la sesión de Tabata o Ruta. Los cambios (hueco,
+    unir, separar) se aplican en vivo.
 - **R9 — Sin reinicio al cambiar de pantalla.** Los huecos no se reinician al navegar entre pantallas.
 
 ## Restricciones
