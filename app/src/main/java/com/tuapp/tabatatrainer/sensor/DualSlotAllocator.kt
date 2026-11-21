@@ -151,8 +151,10 @@ class DualSlotAllocator(
         quarantineSince.keys.retainAll(pending.toSet())
         for (g in pending) {
             if (inQuarantine(g, signals, byId, live, now)) continue
-            quarantineSince.remove(g)
+            // La espera ya cumplida se conserva mientras siga sin hueco: borrarla aquí la reiniciaba cada 30 s
+            // y un aparato sin hueco libre nunca llegaba a usar el que se libera después
             val slot = slotFor(g, signals, live, now) ?: continue
+            quarantineSince.remove(g)
             val displaced = slotGroup[slot]
             slotGroup[slot] = g
             orphanSince.remove(slot)

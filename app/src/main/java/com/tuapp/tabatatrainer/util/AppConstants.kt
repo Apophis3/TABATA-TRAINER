@@ -41,11 +41,6 @@ object AppConstants {
      */
     const val SENSOR_RECONNECT_DELAY_MS = 500L
     
-    /**
-     * Delay antes de iniciar búsqueda ANT+ de cadencia para evitar conflictos con HR (ms)
-     * Permite que HR tenga tiempo de conectarse primero
-     */
-    const val CADENCE_ANT_PLUS_DELAY_MS = 2000L
     
     // ============================================================================
     // Valores por defecto

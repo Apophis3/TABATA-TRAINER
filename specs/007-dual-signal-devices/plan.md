@@ -51,7 +51,25 @@
 - Radio ANT+ compartida: planificador común de ventanas de búsqueda para pulso y cadencia.
 - Un único escaneo BLE continuo por tipo (sin parar/arrancar en bucle).
 - `SensorManager.observeCadence*()` y `cadenceBattery()` delegan; se retiran `createCadenceFlow*`, la
-  autoconexión por `DeviceProfileDao` para cadencia y `BleManagers.kt` (código muerto).
+  autoconexión por `DeviceProfileDao` para cadencia y `BleManagers.kt` (código muerto). El DAO y su entidad de
+  Room no se tocan (quedan sin uso).
+- Detalle (T-03):
+  - **0 rpm es un dato válido.** Una señal de cadencia es "fresca" si está conectada y ha dado dato (aunque sea
+    0) en los últimos 5 s. Si pasan 3 s sin vuelta de biela nueva (o sin dato), su valor pasa a 0 sin
+    desconectarla. Se emite `Value(0)` al hueco igual que cualquier otro valor.
+  - **Emparejado con 0 rpm:** un historial solo de ceros no empareja por valores (ni en la sesión): dos
+    cadenciómetros distintos parados dan la misma serie y un agrupado de sesión erróneo no se deshace hasta
+    reiniciar. En cuanto hay pedaleo, los ceros cuentan en el historial como cualquier valor; con valores planos
+    solo hay agrupación de sesión (la persistente exige variación ≥ 4 rpm) y el empate no agrupa. El nombre
+    (nº ANT+ en el nombre BLE) sí empareja aunque esté parado. Coste aceptado: un aparato dual sin vínculo
+    guardado ni nombre coincidente puede verse en C1 y C2 a 0 rpm hasta que se pedalea; entonces se agrupa y
+    queda en un solo hueco.
+  - **Radio ANT+ compartida (`sensor/AntRadio.kt`):** una sola búsqueda multi-dispositivo con la unión de
+    tipos que piden los hubs (HEARTRATE, BIKE_CADENCE); cada hub deja de pedir su tipo al tener sus 2
+    canales. Ventanas 15 s búsqueda / 15 s pausa (sin cambios). La búsqueda se cierra antes de pedir acceso a
+    un aparato y no se busca mientras alguien conecta (con límite de 20 s por si el acceso no responde). Cada
+    hub para solo lo suyo: parar uno no corta la búsqueda que necesita el otro.
+  - Cadenciómetro ANT+ solo de cadencia (`isSpeedAndCadenceCombined = false`, como hasta ahora).
 
 ### 5. Ciclo de vida — análisis de impacto (Clave 3)
 - `WorkoutService` y `FreeRideService` solo se suscriben a los flujos de `SensorManager`; no se cambia su
@@ -79,7 +97,7 @@
 
 ## Archivos
 - Nuevos: `sensor/SensorDeviceRegistry.kt`, `sensor/PairingPolicy.kt`, `sensor/DualSlotAllocator.kt`,
-  `sensor/CadenceHub.kt`, `ui/components/SensorSlotBadge.kt`, `ui/components/SensorBar.kt`,
+  `sensor/CadenceHub.kt`, `sensor/AntRadio.kt`, `sensor/CscParser.kt`, `ui/components/SensorSlotBadge.kt`, `ui/components/SensorBar.kt`,
   `ui/devices/DevicesSheet.kt` (+ ViewModel),
   tests en `app/src/test/.../sensor/`.
 - Modificados: `sensor/HeartRateHub.kt`, `sensor/SensorManager.kt`, `service/FreeRideService.kt`,

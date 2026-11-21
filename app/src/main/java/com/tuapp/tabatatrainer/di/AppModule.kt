@@ -47,6 +47,6 @@ object AppModule {
         return database.deviceProfileDao()
     }
 
-    // SoundPlayer, BleHeartRateManager, BleCadenceManager, and GpsManager
+    // SoundPlayer, HeartRateHub, CadenceHub, AntRadio, and GpsManager
     // have @Inject constructor. Hilt already knows how to provide them.
 }

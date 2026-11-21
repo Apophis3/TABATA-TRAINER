@@ -6,6 +6,35 @@ memoria privada de Claude. **Lo más reciente arriba.**
 
 ---
 
+## 2026-11-21 — Spec 007 · T-03: cadencia (CadenceHub y radio ANT+ compartida)
+
+### Contexto
+T-02 con prueba real OK y el arreglo de batería ya en el commit `9c89ebb` (falta compilarlo). El usuario pidió
+empezar T-03 sin compilar ni instalar.
+
+### Hecho
+- `plan.md` §4 ampliado antes del código: 0 rpm válido, emparejado con ceros, radio ANT+ compartida.
+- `sensor/AntRadio.kt`: una única búsqueda ANT+ para pulso y cadencia (la búsqueda ocupa la radio; dos
+  búsquedas a la vez se pisaban). `HeartRateHub` pasa a usarla.
+- `sensor/CadenceHub.kt` (espejo de `HeartRateHub`) + `sensor/CscParser.kt`. C1/C2 con las mismas reglas de
+  huecos que HR1/HR2; parado = 0 rpm sin desconectar.
+- `PairingPolicy`: solo ceros no empareja por valores (evita juntar dos cadenciómetros distintos parados).
+- `SensorManager` queda como fachada (contrato igual). Borrado `BleManagers.kt` y todo el código viejo de
+  cadencia y autoconexión (≈2 400 líneas). Room sin tocar.
+- Tests: `CadenceSlotAllocatorTest`, `CadencePairingTest`, `CscParserTest`.
+- Primera pasada de la suite (usuario): los tests nuevos de cadencia OK; fallaba uno de T-02
+  (`una ANT caida un momento no cede su hueco…`). Causa: la cuarentena de 30 s, al cumplirse sin hueco libre,
+  se reiniciaba, y el aparato nunca llegaba a usar el hueco que quedaba libre. Corregido en
+  `DualSlotAllocator.assignPending` (la espera se borra solo al dar hueco).
+
+### Pendiente
+- Commit de T-03 (con el arreglo de cuarentena) hecho a petición del usuario; traspaso listo para hilo nuevo.
+- Usuario: repetir la suite y prueba real (Logcat `🚴` y `💓`; el agente los lee por adb): un cadenciómetro (ANT+ y/o BLE) en
+  C1; parar de pedalear → 0 rpm en ~3 s sin perder el hueco; dos cadenciómetros → C1 y C2; las dos bandas de
+  pulso siguen conectando con la búsqueda compartida. Con eso, cerrar T-02 y T-03.
+
+---
+
 ## 2026-11-21 — Spec 007 · T-02: reparto de huecos (DualSlotAllocator)
 
 ### Contexto

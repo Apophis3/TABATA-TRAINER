@@ -74,7 +74,8 @@ class PairingPolicy(
         }
 
         // 2) Parecido de valores (con desfase)
-        val ready = { s: SignalSnapshot -> s.id !in decided && s.history.size >= t.minSamples }
+        // Una serie solo de ceros (cadenciómetro parado) no identifica nada: dos aparatos distintos parados son iguales
+        val ready = { s: SignalSnapshot -> s.id !in decided && s.history.size >= t.minSamples && s.history.any { it > 0 } }
         val diffs = HashMap<Pair<String, String>, Double>()
         for (a in freshAnts.filter(ready)) for (b in freshBles.filter(ready)) {
             if (lookup.isBlocked(kind, a.id, b.id)) continue

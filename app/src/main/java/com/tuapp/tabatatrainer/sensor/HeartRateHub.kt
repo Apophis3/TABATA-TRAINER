@@ -16,7 +16,6 @@ import android.content.Context
 import android.os.Build
 import android.os.ParcelUuid
 import com.dsi.ant.plugins.antplus.pcc.AntPlusHeartRatePcc
-import com.dsi.ant.plugins.antplus.pcc.MultiDeviceSearch
 import com.dsi.ant.plugins.antplus.pcc.defines.DeviceState
 import com.dsi.ant.plugins.antplus.pcc.defines.DeviceType
 import com.dsi.ant.plugins.antplus.pcc.defines.RequestAccessResult
@@ -25,7 +24,6 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import timber.log.Timber
-import java.util.EnumSet
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
@@ -47,7 +45,7 @@ data class HrDevice(
 /**
  * Gestor único de pulsómetros ANT+ y BLE.
  *
- * - ANT+: búsqueda multi-dispositivo continua y un canal por número de dispositivo.
+ * - ANT+: búsqueda compartida con la cadencia ([AntRadio]) y un canal por número de dispositivo.
  * - BLE: escaneo continuo del servicio HR y un GATT por dirección.
  * - Si el mismo aparato emite por ANT+ y BLE (bandas "dual") se agrupan en un solo pulsómetro y el
  *   vínculo se guarda en [SensorDeviceRegistry] solo si es seguro ([PairingPolicy]): se usa ANT+ y, si deja
@@ -59,8 +57,9 @@ data class HrDevice(
 @Singleton
 class HeartRateHub @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val registry: SensorDeviceRegistry
-) {
+    private val registry: SensorDeviceRegistry,
+    private val antRadio: AntRadio
+) : AntRadioClient {
     companion object {
         const val STALE_MS = 5_000L
         private const val BLE_CONNECT_TIMEOUT_MS = 20_000L
@@ -90,7 +89,7 @@ class HeartRateHub @Inject constructor(
         MutableSharedFlow<HeartRateReading>(replay = 1, extraBufferCapacity = 16, onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
     }
 
-    private var running = false
+    @Volatile private var running = false
     private var tickJob: Job? = null
 
     fun slotFlow(slot: Int): Flow<HeartRateReading> = slotFlows[slot]
@@ -133,7 +132,7 @@ class HeartRateHub @Inject constructor(
             var n = 0
             while (isActive) {
                 tick()
-                if (++n % 5 == 0) ensureBle()
+                if (++n % 5 == 0) { ensureBle(); antRadio.ensure() }
                 delay(1_000)
             }
         }
@@ -266,70 +265,26 @@ class HeartRateHub @Inject constructor(
     // ANT+
     // ------------------------------------------------------------------------
 
-    // La búsqueda multi-dispositivo ocupa la radio del pincho: mientras corre, requestAccess falla con
-    // SEARCH_TIMEOUT / CHANNEL_NOT_AVAILABLE (y la cadencia ANT+ con ALL_CHANNELS_IN_USE). Por eso:
-    // se busca por ventanas cortas, se cierra la búsqueda ANTES de conectar y no se busca mientras
-    // se conecta. Un aparato perdido se recupera volviendo a buscar.
-    private var antSearch: MultiDeviceSearch? = null
+    // La búsqueda ANT+ la lleva [AntRadio], compartida con la cadencia (spec 007, T-03): una sola búsqueda por
+    // ventanas, cerrada antes de pedir acceso y parada mientras alguien conecta. Aquí solo los canales de pulso.
     private val antHandles = ConcurrentHashMap<Int, PccReleaseHandle<AntPlusHeartRatePcc>>()
     private val antConnecting = ConcurrentHashMap.newKeySet<Int>()
-    private var antRetryJob: Job? = null
-    private var antWindowJob: Job? = null
-    private val ANT_SEARCH_WINDOW_MS = 15_000L   // duración de cada ventana de búsqueda
-    private val ANT_SEARCH_PAUSE_MS = 15_000L    // pausa entre ventanas (deja canales libres a la cadencia)
 
-    /** Programa la próxima ventana de búsqueda (sustituye a cualquiera pendiente) */
-    private fun scheduleAntSearch(delayMs: Long) {
-        antRetryJob?.cancel()
-        antRetryJob = scope.launch { delay(delayMs); startAnt() }
-    }
+    // AntRadio llama a estos métodos con su propio cerrojo: no deben tomar el del hub (orden hub → radio)
+    override val antType: DeviceType = DeviceType.HEARTRATE
+    override val antTag = "💓"
+    override fun wantsAntSearch() = running && antHandles.size < SLOTS
+    override fun isAntKnown(number: Int) = antHandles.containsKey(number) || antConnecting.contains(number)
+    override fun onAntFound(number: Int, displayName: String?) = connectAnt(number, displayName)
 
     private fun startAnt() {
-        scope.launch(Dispatchers.Main) {
-            if (!running || antSearch != null || antConnecting.isNotEmpty()) return@launch
-            if (antHandles.size >= SLOTS) { scheduleAntSearch(ANT_SEARCH_PAUSE_MS); return@launch }
-            try {
-                antSearch = MultiDeviceSearch(context, EnumSet.of(DeviceType.HEARTRATE), object : MultiDeviceSearch.SearchCallbacks {
-                    override fun onSearchStarted(rssi: MultiDeviceSearch.RssiSupport?) {
-                        Timber.d("💓 ANT+: búsqueda iniciada")
-                    }
-                    override fun onDeviceFound(result: com.dsi.ant.plugins.antplus.pccbase.MultiDeviceSearch.MultiDeviceSearchResult) {
-                        val number = result.antDeviceNumber
-                        if (antHandles.containsKey(number) || antConnecting.contains(number)) return
-                        Timber.d("💓 ANT+: encontrado ${result.deviceDisplayName} ($number)")
-                        closeAntSearch()   // liberar la radio antes de pedir acceso
-                        connectAnt(number, result.deviceDisplayName)
-                    }
-                    override fun onSearchStopped(reason: RequestAccessResult?) {
-                        Timber.d("💓 ANT+: búsqueda parada ($reason)")
-                        antSearch = null
-                        antWindowJob?.cancel()
-                        if (running && reason != RequestAccessResult.DEPENDENCY_NOT_INSTALLED && antConnecting.isEmpty())
-                            scheduleAntSearch(ANT_SEARCH_PAUSE_MS)
-                    }
-                })
-                antWindowJob?.cancel()
-                antWindowJob = scope.launch {
-                    delay(ANT_SEARCH_WINDOW_MS)
-                    if (antSearch != null) { closeAntSearch(); scheduleAntSearch(ANT_SEARCH_PAUSE_MS) }
-                }
-            } catch (e: Exception) {
-                antSearch = null
-                Timber.e(e, "💓 ANT+: no disponible")
-                if (running) scheduleAntSearch(ANT_SEARCH_PAUSE_MS)
-            }
-        }
-    }
-
-    private fun closeAntSearch() {
-        antWindowJob?.cancel()
-        val s = antSearch
-        antSearch = null
-        try { s?.close() } catch (_: Exception) {}
+        antRadio.register(this)
+        antRadio.request()
     }
 
     private fun connectAnt(number: Int, displayName: String?) {
         if (!running || antHandles.containsKey(number) || !antConnecting.add(number)) return
+        if (!antRadio.beginConnect(this, number)) { antConnecting.remove(number); return }
         val id = "ANT:$number"
         scope.launch(Dispatchers.Main) {
             try {
@@ -348,28 +303,28 @@ class HeartRateHub @Inject constructor(
                             antHandles.remove(number)?.close()
                         }
                         // Seguir buscando (otro pulsómetro, o este mismo si ha fallado)
-                        if (running) scheduleAntSearch(3_000)
+                        antRadio.endConnect(this@HeartRateHub, number)
                     },
                     { state ->
                         if (state == DeviceState.DEAD) {
                             Timber.w("💓 ANT+ $number: perdido, se volverá a buscar")
                             upsert(id) { (it ?: HrDevice(id, displayName ?: id, "ANT+")).copy(connected = false) }
                             antHandles.remove(number)?.close()
-                            if (running) scheduleAntSearch(3_000)
+                            if (running) antRadio.request(AntRadio.RETRY_MS)
                         }
                     })
-                if (handle != null) antHandles[number] = handle else { antConnecting.remove(number); scheduleAntSearch(3_000) }
+                if (handle != null) antHandles[number] = handle
+                else { antConnecting.remove(number); antRadio.endConnect(this@HeartRateHub, number) }
             } catch (e: Exception) {
                 antConnecting.remove(number)
                 Timber.e(e, "💓 ANT+ $number: error al conectar")
-                if (running) scheduleAntSearch(ANT_SEARCH_PAUSE_MS)
+                antRadio.endConnect(this@HeartRateHub, number, AntRadio.SEARCH_PAUSE_MS)
             }
         }
     }
 
     private fun stopAnt() {
-        antRetryJob?.cancel()
-        closeAntSearch()
+        antRadio.release(this)
         antHandles.values.forEach { try { it.close() } catch (_: Exception) {} }
         antHandles.clear()
         antConnecting.clear()
