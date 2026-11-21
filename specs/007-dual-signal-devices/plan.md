@@ -69,6 +69,9 @@
     canales. Ventanas 15 s búsqueda / 15 s pausa (sin cambios). La búsqueda se cierra antes de pedir acceso a
     un aparato y no se busca mientras alguien conecta (con límite de 20 s por si el acceso no responde). Cada
     hub para solo lo suyo: parar uno no corta la búsqueda que necesita el otro.
+    **Cierre fuera del hilo de pantalla** *(prueba real 1.6.111)*: `MultiDeviceSearch.close()` bloquea ~1 s;
+    hecho en el hilo principal congelaba la pantalla cada 30 s. Se cierra en segundo plano, en orden, y antes
+    de pedir acceso a un aparato o abrir otra búsqueda se espera a que el cierre termine (`awaitClosed()`).
   - Cadenciómetro ANT+ solo de cadencia (`isSpeedAndCadenceCombined = false`, como hasta ahora).
 
 ### 5. Ciclo de vida — análisis de impacto (Clave 3)

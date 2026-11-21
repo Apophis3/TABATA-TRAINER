@@ -6,6 +6,31 @@ memoria privada de Claude. **Lo más reciente arriba.**
 
 ---
 
+## 2026-11-21 — Spec 007 · T-03: prueba real 1.6.111 y arreglo del tirón ANT+
+
+### Contexto
+El usuario probó la 1.6.111 (T-03) con las dos bandas; no tiene los cadenciómetros a mano. Logcat leído por adb.
+
+### Visto
+- Dos bandas en HR1/HR2 por ANT+ con la búsqueda compartida; HR2 pasó de BLE a ANT+ en 16 s sin cambiar de hueco.
+- Tirón de ~1 s cada 30 s: el cierre de la búsqueda ANT+ (`MultiDeviceSearch.close()`) bloqueaba el hilo principal.
+- Al arrancar, ADAPTER_NOT_DETECTED durante 1–2 min (también antes de T-03): por eso una banda tarda en pasar a ANT+.
+- Ruta: un solo "HR" y una cadencia → T-05. Detalle de sesión sin C2 → fuera de alcance (Room).
+
+### Hecho
+- `plan.md` §4 anotado. `AntRadio`: cierre en segundo plano y en orden; `awaitClosed()` antes de abrir otra
+  búsqueda y antes de `requestAccess` en `HeartRateHub` y `CadenceHub`.
+
+### Validación (1.6.113)
+- Suite 187/187 verde (22 clases). Logcat: el cierre de la búsqueda ya no bloquea el hilo principal; ANT+ a
+  los 3 s del arranque; dos bandas en HR1/HR2 por ANT+; un corte ANT+→BLE de 14 s en HR2 sin cambiar de hueco.
+- T-02 y T-03 marcadas `[x]`. A T-07: cadencia real y HR2 apagado en Home al quitar una banda.
+
+### Pendiente
+- Commit (cuando lo pida el usuario). Siguiente tarea: T-04, cuando el usuario la pida.
+
+---
+
 ## 2026-11-21 — Spec 007 · T-03: cadencia (CadenceHub y radio ANT+ compartida)
 
 ### Contexto

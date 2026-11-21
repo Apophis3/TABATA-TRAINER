@@ -288,6 +288,7 @@ class HeartRateHub @Inject constructor(
         val id = "ANT:$number"
         scope.launch(Dispatchers.Main) {
             try {
+                antRadio.awaitClosed()   // la búsqueda se cierra en segundo plano: radio libre antes de pedir acceso
                 val handle = AntPlusHeartRatePcc.requestAccess(context, number, 0,
                     { pcc, code, _ ->
                         antConnecting.remove(number)

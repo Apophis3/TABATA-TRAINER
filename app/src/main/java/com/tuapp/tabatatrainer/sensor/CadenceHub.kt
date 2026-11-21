@@ -344,6 +344,7 @@ class CadenceHub @Inject constructor(
         }
         scope.launch(Dispatchers.Main) {
             try {
+                antRadio.awaitClosed()   // la búsqueda se cierra en segundo plano: radio libre antes de pedir acceso
                 // false = solo cadencia (no velocidad+cadencia combinado), como hasta ahora
                 val handle = AntPlusBikeCadencePcc.requestAccess(context, number, 0, false, resultReceiver, stateReceiver)
                 if (handle != null) antHandles[number] = handle

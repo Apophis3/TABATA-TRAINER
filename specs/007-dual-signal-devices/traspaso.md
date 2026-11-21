@@ -54,6 +54,19 @@ Documento para continuar en un hilo nuevo. Pegar en el hilo nuevo:
   - Para cerrarla: compilar, suite verde, prueba real con Logcat `🚴` y `💓` (ver bitácora).
   - Punto a vigilar: si al dejar de pedalear un ANT+ no aparece "parado, 0 rpm" en ~3 s, el plugin repite la
     última cadencia; arreglo previsto: marcar vuelta solo cuando cambie el contador acumulado del evento en bruto.
+  - **Prueba real 1.6.111** (usuario, sin cadenciómetros): dos bandas en HR1/HR2 por ANT+ → OK. Visto:
+    1. Tirón de ~1 s cada 30 s: `MultiDeviceSearch.close()` en el hilo principal (Logcat "Long monitor
+       contention … AntRadio"). **Corregido** (sin compilar): cierre en segundo plano y `awaitClosed()` antes de
+       pedir acceso o abrir otra búsqueda.
+    2. Paso BLE→ANT+ lento: al arrancar, el receptor ANT+ responde ADAPTER_NOT_DETECTED 1–2 min (también en
+       versiones anteriores; es del móvil/servicio ANT+). Luego la 2.ª banda entra en la siguiente ventana.
+       Posible mejora (no hecha, pedir antes): acortar la pausa entre ventanas.
+    3. Ruta muestra un solo "HR" y una cadencia → es T-05 (R7). El usuario prefiere ver los dos.
+    4. Detalle de sesión sin C2 → fuera de alcance (Room); posible spec futura.
+  - **1.6.113 validada:** suite 187/187 verde; el bloqueo de ~1 s ya no es del hilo principal (queda en un hilo
+    de fondo, sin efecto en pantalla). T-02 y T-03 marcadas `[x]`; la cadencia real y "HR2 se apaga en Home"
+    pasan a T-07. Cortes ANT+→BLE de pocos segundos sin cambiar de hueco (R2 funcionando), también en la 1.6.111.
+  - **Siguiente: T-04** (hueco y señal en Tabata y Config), solo cuando el usuario lo pida.
 - **T-04 … T-07** sin empezar. Una tarea cada vez.
 
 ## Pendiente

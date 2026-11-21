@@ -41,6 +41,9 @@ interface AntRadioClient {
  * de los tipos que piden los hubs, por ventanas (15 s buscando / 15 s de pausa); se cierra antes de pedir acceso
  * a un aparato y no se busca mientras alguien conecta (con límite de [CONNECT_TIMEOUT_MS] por si el acceso no
  * responde). Cada hub libera solo lo suyo: parar uno no corta la búsqueda que necesita el otro.
+ *
+ * `MultiDeviceSearch.close()` bloquea ~1 s: se hace en segundo plano y en orden ([closing]); antes de pedir
+ * acceso a un aparato o abrir otra búsqueda se espera a que termine ([awaitClosed]).
  */
 @Singleton
 class AntRadio @Inject constructor(
@@ -64,6 +67,13 @@ class AntRadio @Inject constructor(
     private var retryJob: Job? = null
     private var retryAt = 0L
     private var pluginMissing = false         // ANT+ Plugins sin instalar: no reintentar solo (sí al arrancar un hub)
+    private var closing: Job? = null          // último cierre de búsqueda en curso (fuera del hilo principal)
+
+    /** Espera a que termine el cierre de la búsqueda anterior (la radio queda libre) */
+    suspend fun awaitClosed() {
+        val job = synchronized(this) { closing }
+        job?.join()
+    }
 
     @Synchronized
     fun register(client: AntRadioClient) {
@@ -77,7 +87,7 @@ class AntRadio @Inject constructor(
         if (retryJob?.isActive == true && retryAt <= at) return
         retryJob?.cancel()
         retryAt = at
-        retryJob = scope.launch { delay(delayMs); startSearch() }
+        retryJob = scope.launch { delay(delayMs); awaitClosed(); startSearch() }
     }
 
     /** Red de seguridad (cada pocos segundos desde los hubs): si alguien quiere buscar y nada está previsto, se programa */
@@ -190,6 +200,11 @@ class AntRadio @Inject constructor(
         val s = search
         search = null; searchTypes = emptySet()
         generation++
-        try { s?.close() } catch (_: Exception) {}
+        if (s == null) return
+        val previous = closing
+        closing = scope.launch(Dispatchers.IO) {
+            previous?.join()   // cierres en orden
+            try { s.close() } catch (_: Exception) {}
+        }
     }
 }
