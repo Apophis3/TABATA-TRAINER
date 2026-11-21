@@ -6,6 +6,63 @@ memoria privada de Claude. **Lo más reciente arriba.**
 
 ---
 
+## 2026-11-21 — Spec 007 · T-02: reparto de huecos (DualSlotAllocator)
+
+### Contexto
+T-01 validada por el usuario: compila, suite OK y prueba real con dos bandas puestas una tras otra → HR1 y
+HR2, las dos por ANT+. Esperaba ya la hoja de dispositivos (es T-06) y HR1/HR2 en Ruta (T-05); pidió seguir
+con T-02. Pregunta abierta: abrir la hoja también tocando HR1/HR2/C1/C2 en Tabata (además de Home).
+
+### Hecho
+- `sensor/DualSlotAllocator.kt` (lógica pura, común a pulso y cadencia): sale de `HeartRateHub.tick()` el
+  reparto de huecos, la cuarentena, el relevo y la elección de fuente. Novedades:
+  - Hueco preferido (lo asigna el usuario desde la hoja, T-06; T-02 no lo guarda solo). Reserva blanda.
+  - ANT+ desplaza a BLE: con 2 aparatos ANT+ ningún hueco se queda en un aparato solo-BLE (en el mismo
+    hueco). Un hueco ANT+ caído no pasa a un solo-BLE antes de 60 s (evita saltos en búsquedas ANT+).
+  - `SlotStatus` por hueco (aparato, alias, señal, protocolo, valor, batería) → `HeartRateHub.slotStatus()`.
+- `HeartRateHub`: usa el asignador; sin observadores para las radios a los 5 s pero recuerda los huecos
+  55 s más (R9). `restart()` sigue siendo parada completa. Contrato de `SensorManager` intacto.
+- `DeviceDirectory` (interfaz) en `SensorDeviceRegistry.kt`, implementada por `DeviceBook` y el registro.
+- Tests: `DualSlotAllocatorTest` (dual en un hueco, caída/vuelta ANT+, dos bandas con BLE antes → ANT+,
+  ANT caída no cede hueco, hueco preferido, reserva blanda, reanudar tras parar radios).
+
+### Pendiente
+- Usuario: compilar, pasar la suite de tests y prueba real (Logcat `💓`): dos bandas encendiendo antes los
+  BLE; Home → Tabata → Home sin que cambien los huecos.
+- Los cambios de la spec 006 siguen sin confirmar en `spec-006-outdoor-laps`.
+
+---
+
+## 2026-11-21 — Spec 007 · T-01: aparatos de doble señal (registro genérico + emparejado seguro)
+
+### Contexto
+El usuario ve un solo pulsómetro en HR1 y HR2: la app detecta señales (ANT+ y BLE), no aparatos. Pide un
+aparato = un hueco (HR1/HR2, C1/C2), ANT+ siempre preferente, ver hueco y señal en toda pantalla, que aguante
+dos bandas a la vez y el mismo criterio para la cadencia. Decisiones: emparejado automático (solo si es seguro)
++ manual; gestión en hoja desde el bloque de sensores de Home; hueco fijo por aparato; Ruta con HR1/HR2 y
+C1/C2 separados.
+
+### Hecho
+- Documentación: `specs/007-dual-signal-devices/{spec,plan,tasks}.md` (diagnóstico completo, 7 tareas).
+- T-01 (código): `sensor/SensorDeviceRegistry.kt` sustituye a `HrDeviceRegistry.kt` — `DeviceBook` para pulso
+  y cadencia, fichas de una señal, hueco preferido, manual manda, separar bloquea la pareja, formato v2 que
+  migra el de la spec 003 (mismo archivo de preferencias). `sensor/PairingPolicy.kt`: guarda el vínculo solo
+  si el nº ANT+ va en el nombre BLE o si durante 30 s solo se ven 1 ANT+ y 1 BLE sin pareja; si no, solo en
+  la sesión (pareja mutua sin empate, también en reposo hasta 4 bpm). Al arrancar, el registro vuelca en
+  Logcat (`💓🚴 Registro`) lo guardado, para detectar vínculos erróneos heredados de la spec 003.
+- Conocido y anotado en T-02: con dos bandas indistinguibles los huecos aún pueden quedar en BLE (o
+  BLE:A + ANT:A); no hacer todavía la prueba de dos bandas.
+- `HeartRateHub`: solo cambian el tipo del registro y `detectTwins` (ahora usa `PairingPolicy`). Huecos,
+  cuarentena y relevo sin tocar (T-02).
+- Tests: `DeviceBookTest`, `PairingPolicyTest` (sustituyen a `HrDeviceBookTest`).
+
+### Pendiente
+- Usuario: compilar y `./gradlew test`. Siguiente tarea (T-02, huecos) solo tras su confirmación.
+- Los cambios de la spec 006 (T-11, mapa) siguen sin confirmar en la rama `spec-006-outdoor-laps`; decidir si
+  se confirman antes de abrir la rama `spec-007-dual-signal-devices`.
+
+---
+
 ## 2026-11-21 — Ruta Libre: valor de Ritmo solapado en la ventana Métricas
 
 ### Contexto

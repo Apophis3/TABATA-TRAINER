@@ -50,26 +50,26 @@ data class HrDevice(
  * - ANT+: búsqueda multi-dispositivo continua y un canal por número de dispositivo.
  * - BLE: escaneo continuo del servicio HR y un GATT por dirección.
  * - Si el mismo aparato emite por ANT+ y BLE (bandas "dual") se agrupan en un solo pulsómetro y el
- *   vínculo se guarda en [HrDeviceRegistry]: se usa ANT+ y, si deja de llegar, BLE, sin cambiar de hueco.
- * - Cada pulsómetro físico ocupa un hueco fijo (HR1 o HR2) durante la sesión.
+ *   vínculo se guarda en [SensorDeviceRegistry] solo si es seguro ([PairingPolicy]): se usa ANT+ y, si deja
+ *   de llegar, BLE, sin cambiar de hueco.
+ * - El reparto de huecos (HR1/HR2) lo decide [DualSlotAllocator]: un aparato = un hueco, hueco preferido,
+ *   ANT+ desplaza a BLE. Al quedarse sin observadores se paran las radios a los 5 s, pero los huecos se
+ *   recuerdan [SLOT_MEMORY_MS] más para no repartirlos de nuevo al cambiar de pantalla (spec 007, R9).
  */
 @Singleton
 class HeartRateHub @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val registry: HrDeviceRegistry
+    private val registry: SensorDeviceRegistry
 ) {
     companion object {
         const val STALE_MS = 5_000L
         private const val BLE_CONNECT_TIMEOUT_MS = 20_000L
         private const val SLOTS = 2
-        private const val HISTORY = 20             // muestras (1 Hz) guardadas por dispositivo
-        private const val TWIN_MIN_SAMPLES = 15    // muestras mínimas antes de comparar ANT+ y BLE
-        private const val TWIN_MAX_LAG = 5         // desfase máximo ANT+/BLE probado (s)
-        private const val TWIN_MAX_AVG_DIFF = 4.0  // diferencia media (con desfase) para vincular de forma permanente
-        private const val TWIN_MIN_RANGE = 4       // variación mínima de HR para que la comparación sea fiable
-        private const val TWIN_FLAT_MAX_DIFF = 2.0 // con HR plana: solo se agrupan en la sesión (no se guarda)
-        private const val QUARANTINE_MS = 30_000L  // espera de un desconocido antes de darle hueco propio
+        private const val HISTORY = 20             // muestras (1 Hz) guardadas por dispositivo (≥ PairingThresholds.HR.minSamples)
+        private val KIND = SensorKind.HR
         private const val HANDOFF_MAX_DIFF = 15    // relevo sin solapamiento: diferencia máxima con el último bpm del hueco
+        private const val RADIO_STOP_DELAY_MS = 5_000L   // sin observadores: parar radios
+        private const val SLOT_MEMORY_MS = 55_000L       // ...y olvidar los huecos tras este margen adicional
         private val HR_SERVICE = UUID.fromString("0000180D-0000-1000-8000-00805f9b34fb")
         private val HR_MEASUREMENT = UUID.fromString("00002A37-0000-1000-8000-00805f9b34fb")
         private val CCC_DESCRIPTOR = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
@@ -82,15 +82,10 @@ class HeartRateHub @Inject constructor(
     private val _devices = MutableStateFlow<Map<String, HrDevice>>(emptyMap())
     val devices: StateFlow<Map<String, HrDevice>> = _devices.asStateFlow()
 
-    // Vínculos solo de esta sesión (relevos sin solapamiento o HR plana): id -> grupo
-    private val sessionTwins = ConcurrentHashMap<String, String>()
+    private val pairing = PairingPolicy(KIND, PairingThresholds.HR)
+    private val allocator = DualSlotAllocator(KIND, registry, "HR", HANDOFF_MAX_DIFF, SLOTS) { Timber.d("💓 $it") }
     private val history = HashMap<String, ArrayDeque<Int>>()
-    private val quarantineSince = HashMap<String, Long>()
 
-    // Hueco -> id del grupo (clave del registro si está vinculado, si no el id del dispositivo)
-    private val slotGroup = arrayOfNulls<String>(SLOTS)
-    private val slotLastBpm = IntArray(SLOTS)
-    private val slotSource = arrayOfNulls<String>(SLOTS)   // dispositivo que alimenta el hueco ahora
     private val slotFlows = List(SLOTS) {
         MutableSharedFlow<HeartRateReading>(replay = 1, extraBufferCapacity = 16, onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
     }
@@ -105,14 +100,23 @@ class HeartRateHub @Inject constructor(
 
     fun slotBattery(slot: Int): StateFlow<SensorBattery?> = slotBatteries[slot].asStateFlow()
 
+    // Estado completo de cada hueco: aparato, señal (ANT+/BLE), valor y batería (spec 007, T-02; la UI lo usa en T-04)
+    private val slotStatuses = List(SLOTS) { MutableStateFlow(SlotStatus(it)) }
+
+    fun slotStatus(slot: Int): StateFlow<SlotStatus> = slotStatuses[slot].asStateFlow()
+
     init {
-        // Arranca cuando alguien observa HR1/HR2 y se para 5 s después de que nadie lo haga
+        // Arranca cuando alguien observa HR1/HR2. Sin observadores: radios fuera a los 5 s y huecos
+        // olvidados 55 s después (si vuelve un observador antes, collectLatest cancela la espera).
         scope.launch {
             combine(slotFlows.map { it.subscriptionCount }) { counts -> counts.sum() }
                 .map { it > 0 }
                 .distinctUntilChanged()
                 .collectLatest { active ->
-                    if (active) start() else { delay(5_000); stop() }
+                    if (active) start() else {
+                        delay(RADIO_STOP_DELAY_MS); stopRadios()
+                        delay(SLOT_MEMORY_MS); forgetSlots()
+                    }
                 }
         }
     }
@@ -135,20 +139,37 @@ class HeartRateHub @Inject constructor(
         }
     }
 
+    /** Parada completa: radios y huecos */
     @Synchronized
     fun stop() {
+        stopRadios()
+        forgetSlots()
+    }
+
+    /** Para las radios y la sesión de señales, pero recuerda qué aparato va en cada hueco */
+    @Synchronized
+    private fun stopRadios() {
         if (!running) return
         running = false
-        Timber.d("💓 HeartRateHub: parada")
+        Timber.d("💓 HeartRateHub: parada (huecos recordados)")
         tickJob?.cancel()
         stopAnt()
         stopBle()
         _devices.value = emptyMap()
         // El registro persistente NO se borra: los vínculos ANT+ ↔ BLE sobreviven entre sesiones
-        sessionTwins.clear(); history.clear(); quarantineSince.clear()
-        for (i in 0 until SLOTS) { slotGroup[i] = null; slotSource[i] = null; slotLastBpm[i] = 0 }
+        history.clear(); pairing.reset(); allocator.pause()
         slotBatteries.forEach { it.value = null }
+        slotStatuses.forEachIndexed { i, s -> s.value = SlotStatus(i, deviceKey = allocator.groupIn(i)) }
         slotFlows.forEach { it.resetReplayCache() }
+    }
+
+    /** Olvida el reparto de huecos y los vínculos de sesión (solo con las radios paradas) */
+    @Synchronized
+    private fun forgetSlots() {
+        if (running) return
+        allocator.clear()
+        slotStatuses.forEachIndexed { i, s -> s.value = SlotStatus(i) }
+        Timber.d("💓 HeartRateHub: huecos olvidados")
     }
 
     /** Fuerza una reconexión completa (botón "reconectar") */
@@ -175,74 +196,35 @@ class HeartRateHub @Inject constructor(
     private fun onBpm(id: String, bpm: Int) {
         if (!running || bpm !in 25..250) return
         upsert(id) { it!!.copy(bpm = bpm, lastUpdateMs = System.currentTimeMillis(), connected = true) }
-        for (i in 0 until SLOTS) if (slotSource[i] == id) slotFlows[i].tryEmit(HeartRateReading.Value(bpm))
+        for (i in 0 until SLOTS) if (allocator.sourceOf(i) == id) slotFlows[i].tryEmit(HeartRateReading.Value(bpm))
     }
 
-    /** Aparato físico al que pertenece una identidad: registro persistente > vínculo de sesión > ella misma */
-    private fun groupOf(id: String): String =
-        registry.keyOf(id) ?: sessionTwins[id]?.let { registry.keyOf(it) ?: it } ?: id
-
-    private fun isKnown(id: String) = registry.keyOf(id) != null || sessionTwins.containsKey(id)
-
-    /** Cada segundo: detecta gemelos ANT+/BLE, reparte huecos y elige la fuente de cada hueco */
+    /** Cada segundo: empareja señales, reparte huecos y publica la fuente de cada hueco */
     @Synchronized
     private fun tick() {
         val now = System.currentTimeMillis()
         val devs = _devices.value
         updateHistory(devs, now)
         detectTwins(devs, now)
-        detectHandoffs(devs, now)
 
-        // Grupos vivos (con algún dispositivo conectado)
-        val groups = devs.values.filter { it.connected }.map { groupOf(it.id) }.toSet()
-
-        // Un hueco cuyo aparato se ha vinculado a otro pasa a la clave del aparato físico
-        for (i in 0 until SLOTS) {
-            val g = slotGroup[i] ?: continue
-            val merged = groupOf(g)
-            if (merged != g) slotGroup[i] = if (slotGroup.contains(merged)) null else merged
+        val signals = devs.values.map {
+            SignalState(it.id, it.name, it.protocol == "ANT+", it.connected, it.isFresh(now), it.bpm, it.battery)
         }
-        // Si un aparato quedó en dos huecos tras agruparse, conservar el más bajo (HR1)
-        for (i in 0 until SLOTS) for (j in i + 1 until SLOTS)
-            if (slotGroup[i] != null && slotGroup[i] == slotGroup[j]) slotGroup[j] = null
-
-        // Asignar grupos nuevos a huecos libres (ANT+ primero). Un hueco cuyo grupo ya no existe se
-        // reserva para su aparato y solo se reutiliza si no queda otro libre.
-        val pending = groups.filter { it !in slotGroup }.sortedBy { if (it.startsWith("ANT:")) 0 else 1 }
-        quarantineSince.keys.retainAll(pending.toSet())
-        for (g in pending) {
-            if (inQuarantine(g, devs, groups, now)) continue
-            quarantineSince.remove(g)
-            val free = (0 until SLOTS).firstOrNull { slotGroup[it] == null }
-                ?: (0 until SLOTS).firstOrNull { slotGroup[it] !in groups }
-                ?: break
-            slotGroup[free] = g
-        }
-
-        // Fuente de cada hueco: ANT+ si está fresco, si no su gemelo BLE
-        for (i in 0 until SLOTS) {
-            val g = slotGroup[i]
-            val members = if (g == null) emptyList() else devs.values.filter { groupOf(it.id) == g }
-            val best = members.filter { it.isFresh(now) }.minByOrNull { if (it.protocol == "ANT+") 0 else 1 }
-                ?: members.firstOrNull { it.connected && it.protocol == "ANT+" }
-                ?: members.firstOrNull { it.connected }
-            val newSource = best?.id
-            val changed = newSource != slotSource[i]
-            slotSource[i] = newSource
-            // ANT+ HR no da batería (SDK 3.9): se usa la del gemelo BLE de la misma banda (spec 005, T-03)
-            slotBatteries[i].value = best?.battery ?: members.firstNotNullOfOrNull { it.battery }
-            if (best != null && best.bpm > 0) slotLastBpm[i] = best.bpm
+        for (st in allocator.tick(signals, now)) {
+            val i = st.slot
+            val changed = st.sourceId != slotStatuses[i].value.sourceId
+            slotStatuses[i].value = st
+            slotBatteries[i].value = st.battery
             val out = slotFlows[i]
-            if (best == null) {
-                if (changed) out.tryEmit(if (g == null) HeartRateReading.Scanning else HeartRateReading.Disconnected)
+            if (st.sourceId == null) {
+                if (changed) out.tryEmit(if (st.deviceKey == null) HeartRateReading.Scanning else HeartRateReading.Disconnected)
             } else {
                 // Reemitir Connected en cada tick: como el flow tiene replay=1 y entre ticks
                 // llegan muchos Value, un suscriptor tardío solo replayaría el último Value y
                 // nunca vería el protocolo. Reemitirlo cada segundo lo mantiene visible (badge).
-                out.tryEmit(HeartRateReading.Connected(best.name, best.protocol))
-                if (changed && best.bpm > 0) out.tryEmit(HeartRateReading.Value(best.bpm))
+                out.tryEmit(HeartRateReading.Connected(st.sourceName ?: st.sourceId, st.protocol ?: "BLE"))
+                if (changed && st.value > 0) out.tryEmit(HeartRateReading.Value(st.value))
             }
-            if (changed) Timber.d("💓 Hueco HR${i + 1}: ${best?.let { "${it.name} (${it.protocol})" } ?: "—"}")
         }
     }
 
@@ -258,78 +240,24 @@ class HeartRateHub @Inject constructor(
         }
     }
 
-    /**
-     * Un desconocido no recibe hueco propio durante QUARANTINE_MS si podría ser la otra cara de un
-     * aparato que ya tiene hueco: otro protocolo sin vincular con hueco, o un hueco caído que podría relevar.
-     */
-    private fun inQuarantine(g: String, devs: Map<String, HrDevice>, groups: Set<String>, now: Long): Boolean {
-        val d = devs[g] ?: return false
-        if (isKnown(d.id)) return false
-        val possibleTwin = devs.values.any { o ->
-            o.protocol != d.protocol && o.connected && registry.partnerOf(o.id) == null && groupOf(o.id) in slotGroup
-        }
-        val orphanSlot = (0 until SLOTS).any { i -> slotGroup[i]?.let { it !in groups && canHandoff(it, d, devs) } == true }
-        if (!possibleTwin && !orphanSlot) return false
-        val since = quarantineSince.getOrPut(g) {
-            Timber.d("💓 ${d.name} (${d.protocol}): en espera, ¿es el mismo aparato que uno ya asignado?")
-            now
-        }
-        return now - since < QUARANTINE_MS
-    }
-
-    /** Solo puede relevar si el aparato del hueco no tiene ya ese protocolo (si lo tuviera, sería otro aparato) */
-    private fun canHandoff(slotGroupId: String, d: HrDevice, devs: Map<String, HrDevice>): Boolean {
-        val protocols = devs.values.filter { groupOf(it.id) == slotGroupId }.map { it.protocol }.toSet()
-        return protocols.isNotEmpty() && d.protocol !in protocols && registry.partnerOf(d.id) == null
-    }
-
-    /**
-     * Relevo sin solapamiento: el aparato del hueco se ha caído por un protocolo (p. ej. se quitó el
-     * pincho ANT+) y aparece un desconocido por el otro con un bpm compatible → hereda el hueco.
-     * Solo se vincula en la sesión; se guardará cuando ambos coincidan y se confirme.
-     */
-    private fun detectHandoffs(devs: Map<String, HrDevice>, now: Long) {
-        val groups = devs.values.filter { it.connected }.map { groupOf(it.id) }.toSet()
-        val orphans = (0 until SLOTS).filter { i -> slotGroup[i].let { it != null && it !in groups } }
-        if (orphans.isEmpty()) return
-        for (d in devs.values) {
-            if (!d.isFresh(now) || isKnown(d.id) || d.id in slotGroup) continue
-            val candidates = orphans.filter { i ->
-                canHandoff(slotGroup[i]!!, d, devs) && slotLastBpm[i] > 0 &&
-                    kotlin.math.abs(d.bpm - slotLastBpm[i]) <= HANDOFF_MAX_DIFF
-            }
-            if (candidates.size == 1) {
-                val i = candidates.single()
-                sessionTwins[d.id] = slotGroup[i]!!
-                Timber.d("💓 ${d.name} (${d.protocol}) releva al aparato de HR${i + 1}")
-            }
-        }
-    }
-
+    /** Emparejado ANT+ ↔ BLE según [PairingPolicy] (spec 007, R3): persistente solo si es seguro */
     private fun detectTwins(devs: Map<String, HrDevice>, now: Long) {
-        val ants = devs.values.filter { it.protocol == "ANT+" && it.isFresh(now) }
-        val bles = devs.values.filter { it.protocol == "BLE" && it.isFresh(now) }
-        for (b in bles) for (a in ants) {
-            if (registry.partnerOf(a.id) != null || registry.partnerOf(b.id) != null) continue
-            // Garmin y otros ponen el número ANT+ en el nombre BLE ("HRM-Pro:12345")
-            val antNumber = a.id.removePrefix("ANT:")
-            val nameMatch = antNumber.length >= 4 && b.name.filter { it.isDigit() }.endsWith(antNumber)
-            // Comparar series con desfase: ANT+ y BLE del mismo aparato llegan con unos segundos de retraso
-            val ha = history[a.id].orEmpty()
-            val hb = history[b.id].orEmpty()
-            val enough = ha.size >= TWIN_MIN_SAMPLES && hb.size >= TWIN_MIN_SAMPLES
-            val diff = if (enough) minLaggedAvgDiff(ha, hb, TWIN_MAX_LAG) else Double.MAX_VALUE
-            // Con la HR plana dos personas distintas podrían parecer iguales: exigir variación para guardarlo
-            val varies = enough && (ha.max() - ha.min()) >= TWIN_MIN_RANGE && (hb.max() - hb.min()) >= TWIN_MIN_RANGE
-            if (nameMatch || (diff <= TWIN_MAX_AVG_DIFF && varies)) {
-                registry.link(a.id, b.id, a.name)
-                sessionTwins.remove(a.id); sessionTwins.remove(b.id)
-                Timber.d("💓 ${b.name} (BLE) es el mismo aparato que ${a.name} (ANT+) — guardado")
-            } else if (diff <= TWIN_FLAT_MAX_DIFF && groupOf(a.id) != groupOf(b.id)) {
-                // Sin variación suficiente: agrupar solo en esta sesión, sin guardar
-                val (joiner, target) = if (groupOf(a.id) in slotGroup) b to a else a to b
-                sessionTwins[joiner.id] = groupOf(target.id)
-                Timber.d("💓 ${b.name} (BLE) y ${a.name} (ANT+) agrupados en la sesión (HR plana)")
+        val signals = devs.values.filter { it.connected }.map {
+            SignalSnapshot(it.id, it.name, it.isFresh(now), history[it.id]?.toList().orEmpty())
+        }
+        for (p in pairing.evaluate(signals, registry)) {
+            val a = devs[p.antId] ?: continue
+            val b = devs[p.bleId] ?: continue
+            if (p.persistent) {
+                if (registry.link(KIND, a.id, b.id, a.name, manual = false)) {
+                    allocator.leaveSession(a.id, b.id)
+                    Timber.d("💓 ${b.name} (BLE) es el mismo aparato que ${a.name} (ANT+) — guardado (${p.reason})")
+                }
+            } else if (allocator.groupOf(a.id) != allocator.groupOf(b.id)) {
+                // Agrupar solo en esta sesión, sin guardar: se une al que ya tiene hueco
+                val (joiner, target) = if (allocator.hasSlot(allocator.groupOf(a.id))) b to a else a to b
+                allocator.joinSession(joiner.id, allocator.groupOf(target.id))
+                Timber.d("💓 ${b.name} (BLE) y ${a.name} (ANT+) agrupados en la sesión (${p.reason})")
             }
         }
     }
