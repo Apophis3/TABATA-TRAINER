@@ -33,8 +33,7 @@ usuario confirme la anterior con evidencia. El agente **no** ejecuta Gradle ni `
   (`ProtocolBadge`, `SensorSlotBadge`, `SensorSlotsViewModel`, `SlotStatus.signalState`); Tabata con señal y
   batería por hueco y barra superior apartada de la flecha; Config en rejilla HR1 HR2 / C1 C2.
   Visto en la prueba: la Decathlon (HR2) da una línea más irregular que la XOSS (HR1) aunque se cambien de
-  sitio → es la banda (cada una calcula su valor), no la app. Fuera de T-04: el lápiz de Config tapa en parte
-  el interruptor del GPS; al quitar una banda ANT+ sigue dando el último valor ~10–20 s.
+  sitio → es la banda (cada una calcula su valor), no la app. Fuera de T-04: al quitar una banda ANT+ sigue dando el último valor ~10–20 s.
 - [x] T-05 *(validada 2026-11-21 con la 1.6.120: suite 194/194 verde; ruta con dos bandas por ANT+; BD con HR1 y HR2 separados; capturas en vertical y horizontal)*
   **Ruta Libre separada.** HR1/HR2 y C1/C2 con señal; medias HR1/HR2 separadas; escucha C2.
   Hecho: `util/laps/DualSlotSamples` (lecturas por hueco); `FreeRideStats` con campos HR2/C2; colector C2 y
@@ -42,6 +41,15 @@ usuario confirme la anterior con evidencia. El agente **no** ejecuta Gradle ni `
   tarjeta HR1 | HR2, C1 | C2 si hay cadencia (si no, ritmo), vuelta en curso con HR1 y HR2, barra con GPS y los
   4 huecos. Sin probar: cierre de vueltas (pasa a T-07), C2 y cadencia real (T-07). Visto: en horizontal la
   franja de pasos queda bajo el indicador de páginas (la columna se desplaza).
+- [ ] Arreglos menores *(pedidos por el usuario 2026-11-21 antes de T-06; detalle en `plan.md` §8)*: valor
+  congelado al quitar una banda (ANT+ sin latidos nuevos, BLE sin contacto → R2.1); Ruta horizontal con la franja
+  de pasos bajo el indicador de páginas. (El "lápiz" de Config no es un fallo: es el S Pen del usuario; no se toca.)
+  *Prueba 1.6.123: suite 202/202 verde; corte BLE "sin contacto" visto en Logcat. Falta: parte ANT+ (no conectó,
+  ADAPTER_NOT_DETECTED) y capturas de Ruta horizontal/vertical.*
+- [ ] Ruta: un pulsómetro → tarjeta grande; pasos/min en la vuelta *(pedido por el usuario 2026-11-21; formalizar
+  en `spec.md`/`plan.md` antes del código)*: en la página 1, con un solo pulsómetro con señal, una sola tarjeta de
+  pulso con el número lo más grande posible (con dos, HR1 | HR2); en la página 3, casilla de pasos/min en la
+  vuelta en curso.
 - [ ] T-06 **Hoja "Dispositivos" común + Home.** Estado real por hueco en Home; hoja con
   unir/separar/renombrar/hueco/olvidar/reconectar/guiado; barra de sensores común `SensorBar` que abre la hoja
   al tocarla en Home, Tabata, Ruta (también en marcha) y Config (R8.1–R8.3); la flecha sigue reconectando.

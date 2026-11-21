@@ -85,6 +85,8 @@ private const val PAGE_MAP = 1
 private const val PAGE_LAPS = 2
 private const val PAGE_TABLE = 3
 private const val PAGE_COUNT = 4
+// Alto que ocupa el indicador de páginas sobre el borde inferior (40 dp mínimo + 16 dp de margen)
+private val PAGE_INDICATOR_CLEARANCE = 56.dp
 
 // ============================================================================
 // PANTALLA PRINCIPAL FREE RIDE
@@ -309,50 +311,9 @@ private fun MetricsPage(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Las tarjetas ocupan el alto que deja libre la franja de pasos (que se mide antes,
-            // al no llevar weight) y ajustan el tamaño del número a ese alto: así la franja
-            // ya no queda recortada y sus etiquetas se leen enteras.
-            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-                val density = LocalDensity.current
-                val cardPadding = 16.dp
-                val rowHeight = (maxHeight - 12.dp) / 2
-                // Alto de tarjeta = 2·padding + número + 4 dp + etiqueta (interlineado M3 ~24 dp)
-                val valueLine = rowHeight - cardPadding * 2 - 4.dp - 24.dp
-                val valueFontSize = with(density) { (valueLine / 1.3f).toSp() }
-                    .value.coerceIn(28f, 55f).sp
-                // Fila de pulso y cadencia: cada mitad lleva debajo hueco + señal + batería (~18 dp más)
-                val splitFontSize = with(density) { ((valueLine - 18.dp) / 1.3f).toSp() }
-                    .value.coerceIn(24f, 55f).sp
-                val slots = rememberSensorSlots()
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        LapMetricCardNoIcon(
-                            value = if (stats.currentSpeedKmh > 0.5f) String.format("%.1f", stats.currentSpeedKmh) else "--",
-                            unit = "km/h",
-                            label = "Velocidad",
-                            valueFontSize = valueFontSize,
-                            contentPadding = cardPadding,
-                            modifier = Modifier.weight(1f)
-                        )
-                        LapMetricCardNoIcon(
-                            value = String.format("%.2f", stats.totalDistanceMeters / 1000f),
-                            unit = "km",
-                            label = "Distancia",
-                            valueFontSize = valueFontSize,
-                            contentPadding = cardPadding,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                    // Alto fijo de fila: las dos tarjetas igual de altas aunque una vaya partida y la otra no
-                    Row(
-                        Modifier.fillMaxWidth().height(rowHeight),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        HeartRateSplitCard(stats, slots, Modifier.weight(1f).fillMaxHeight(), splitFontSize, cardPadding)
-                        CadencePaceCard(stats, slots, Modifier.weight(1f).fillMaxHeight(), splitFontSize, cardPadding)
-                    }
-                }
-            }
+            // Las tarjetas ocupan el alto que deja libre la franja de pasos y ajustan el número a ese alto:
+            // así la franja ya no queda recortada y sus etiquetas se leen enteras.
+            MetricsGrid(stats, Modifier.weight(1f).fillMaxWidth())
             // Podómetro del móvil: solo si hay pasos (franja compacta para que quepa)
             if (stats.steps > 0) StepsStrip(stats)
         }
@@ -363,6 +324,55 @@ private fun MetricsPage(
         FreeRideControls(stats, onStart, onPause, onResume, onStop, onLap)
 
         Spacer(modifier = Modifier.height(60.dp))
+    }
+}
+
+/**
+ * Velocidad y distancia arriba, pulso y cadencia abajo. Las tarjetas ocupan el alto que les da [modifier]
+ * (la franja de pasos se mide antes, al no llevar weight) y el tamaño del número se ajusta a ese alto, en
+ * vertical y en horizontal (spec 007, plan §8: en horizontal la franja quedaba bajo el indicador de páginas).
+ */
+@Composable
+private fun MetricsGrid(stats: FreeRideStats, modifier: Modifier, cardPadding: Dp = 16.dp) {
+    BoxWithConstraints(modifier) {
+        val density = LocalDensity.current
+        val rowHeight = (maxHeight - 12.dp) / 2
+        // Alto de tarjeta = 2·padding + número + 4 dp + etiqueta (interlineado M3 ~24 dp)
+        val valueLine = rowHeight - cardPadding * 2 - 4.dp - 24.dp
+        val valueFontSize = with(density) { (valueLine / 1.3f).toSp() }
+            .value.coerceIn(28f, 55f).sp
+        // Fila de pulso y cadencia: cada mitad lleva debajo hueco + señal + batería (~18 dp más)
+        val splitFontSize = with(density) { ((valueLine - 18.dp) / 1.3f).toSp() }
+            .value.coerceIn(24f, 55f).sp
+        val slots = rememberSensorSlots()
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                LapMetricCardNoIcon(
+                    value = if (stats.currentSpeedKmh > 0.5f) String.format("%.1f", stats.currentSpeedKmh) else "--",
+                    unit = "km/h",
+                    label = "Velocidad",
+                    valueFontSize = valueFontSize,
+                    contentPadding = cardPadding,
+                    modifier = Modifier.weight(1f)
+                )
+                LapMetricCardNoIcon(
+                    value = String.format("%.2f", stats.totalDistanceMeters / 1000f),
+                    unit = "km",
+                    label = "Distancia",
+                    valueFontSize = valueFontSize,
+                    contentPadding = cardPadding,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            // Alto fijo de fila: las dos tarjetas igual de altas aunque una vaya partida y la otra no
+            Row(
+                Modifier.fillMaxWidth().height(rowHeight),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                HeartRateSplitCard(stats, slots, Modifier.weight(1f).fillMaxHeight(), splitFontSize, cardPadding)
+                CadencePaceCard(stats, slots, Modifier.weight(1f).fillMaxHeight(), splitFontSize, cardPadding)
+            }
+        }
     }
 }
 
@@ -1132,36 +1142,17 @@ private fun LandscapeMetricsPage(
 
         // Derecha: Métricas (65%) - SIN ICONOS, DATOS MÁS GRANDES
         // ⚡ SOLO: Velocidad, Distancia, HR, Cadencia (SIN Altitud, Desnivel, avg, laps)
+        // Sin desplazamiento y con hueco abajo para el indicador de páginas (antes la franja de pasos quedaba
+        // debajo): las tarjetas ajustan el número al alto que queda (plan §8).
         Column(
             modifier = Modifier
                 .weight(0.65f)
                 .fillMaxHeight()
-                .verticalScroll(rememberScrollState())
-                .padding(start = 8.dp)
+                .padding(start = 8.dp, bottom = PAGE_INDICATOR_CLEARANCE),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                LapMetricCardNoIcon(
-                    value = if (stats.currentSpeedKmh > 0.5f) String.format("%.1f", stats.currentSpeedKmh) else "--",
-                    unit = "km/h",
-                    label = "Velocidad",
-                    modifier = Modifier.weight(1f)
-                )
-                LapMetricCardNoIcon(
-                    value = String.format("%.2f", stats.totalDistanceMeters / 1000f),
-                    unit = "km",
-                    label = "Distancia",
-                    modifier = Modifier.weight(1f)
-                )
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                HeartRateSplitCard(stats, slots, Modifier.weight(1f))
-                CadencePaceCard(stats, slots, Modifier.weight(1f))
-            }
-            if (stats.steps > 0) {
-                Spacer(modifier = Modifier.height(12.dp))
-                StepsStrip(stats)
-            }
+            MetricsGrid(stats, Modifier.weight(1f).fillMaxWidth(), cardPadding = 10.dp)
+            if (stats.steps > 0) StepsStrip(stats)
             // ⚡ ELIMINADAS: Altitud, Desnivel+, avg, laps (no deben aparecer)
         }
     }

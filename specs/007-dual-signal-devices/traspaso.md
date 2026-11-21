@@ -4,10 +4,34 @@ Documento para continuar en un hilo nuevo. Pegar en el hilo nuevo:
 
 > Lee AGENTS.md, docs/constitution.md, specs/007-dual-signal-devices/{spec.md, plan.md, tasks.md, traspaso.md}
 > y la primera entrada de 00_estado_proyecto_y_memoria.md. Seguimos con la spec 007 en la rama
-> `spec-007-dual-signal-devices` (T-01…T-05 validadas). Empieza T-06: hoja "Dispositivos" común + Home, con la
-> barra de sensores común `SensorBar` que abre la hoja en Home, Tabata, Ruta y Config (R8, R8.1–R8.3). Punto de
-> partida en `traspaso.md`, sección "T-06". Anota el detalle en `plan.md` antes del código. Valida con mis
+> `spec-007-dual-signal-devices` (T-01…T-05 validadas; arreglos menores de §8 validados en parte con la 1.6.123).
+> Antes de T-06 haz mis dos peticiones de Ruta Libre de la sección "Siguiente" de `traspaso.md`: (1) página 1,
+> con un solo pulsómetro con señal, una sola tarjeta de pulso con el número lo más grande posible (con dos,
+> HR1 | HR2 como ahora); (2) página 3, casilla de pasos/min en la vuelta en curso. Formalízalas primero en
+> `spec.md` y `plan.md`. Luego seguiremos con T-06 (hoja "Dispositivos" + Home + `SensorBar`). Valida con mis
 > pruebas (lee tú los resultados de tests y el Logcat del móvil). No compiles ni instales (lo hago yo).
+
+## Siguiente (peticiones del usuario 2026-11-21, antes de T-06)
+Comportamiento nuevo de pantalla: anotarlo en `spec.md` (requisito nuevo) y `plan.md` (§9) antes del código.
+Solo `FreeRideScreen.kt` (+ quizá `CurrentLapModel`); sin Room, sin servicios, sin `NavGraph.kt`.
+1. **Ruta página 1 — un pulsómetro, tarjeta grande.** Hoy `MetricsGrid` (`ui/freeride/FreeRideScreen.kt`
+   l. 336) pone siempre `HeartRateSplitCard` (l. 844) con HR1 | HR2. Pedido: si solo **un** hueco HR tiene señal
+   (caso típico: se puso dos bandas y se quitó una), una sola tarjeta con ese pulso a tamaño completo, como
+   Velocidad/Distancia (`LapMetricCardNoIcon`), con su etiqueta HR1 o HR2. Con dos con señal, HR1 | HR2 como
+   ahora. Ojo: el hueco quitado sigue "Conectado" un rato sin datos (Logcat 1.6.123: HR2 "Conectado" 14 s tras
+   "sin contacto" hasta que la banda se desconecta) → decidir por **señal fresca/valor > 0**, no por "conectado".
+   Evitar parpadeo (un hueco que va y viene no debe cambiar la tarjeta cada segundo: p. ej. usar la frescura de
+   5 s de `SlotStatus`). Igual en horizontal. Test de la regla de elección si se saca a una función pura.
+2. **Ruta página 3 — pasos/min en la vuelta en curso.** `currentLapStats` (l. 716) da 9 casillas (3×3): Tiempo,
+   Distancia, Ritmo, Velocidad, HR1, HR2, Pasos, Cadencia, Desnivel+. La casilla "Cadencia" ya muestra ppm de la
+   vuelta, pero **solo si ningún cadenciómetro emite** y tras 10 s de vuelta (`CurrentLapModel` l. 51–60, RF-7.5
+   "nunca se mezclan"); con cadenciómetro muestra rpm. El usuario quiere ver siempre los pasos/min, separados de
+   la cadencia de bici ("creo que hay hueco para otro cuadradito"). Proponer: casilla propia "Pasos/min" (ppm de
+   la vuelta) y "Cadencia" solo rpm de bici; ver cómo cabe una 10.ª casilla (o qué se agrupa) en vertical y en
+   horizontal (3×3 hoy). En la página 3 le da igual que se vean los dos pulsos (HR1 y HR2 se quedan).
+3. **Validación pendiente de los arreglos menores (§8):** parte ANT+ ("sin latidos nuevos", cuando ANT+ conecte)
+   y capturas de Ruta página 1 en horizontal con pasos y en vertical (regresión de `MetricsGrid`). Después,
+   marcar "Arreglos menores" `[x]` en `tasks.md` si el usuario lo confirma.
 
 ## Objetivo de la spec
 - Un aparato físico (pulsómetro o cadenciómetro, emite por ANT+ y BLE) = un hueco fijo (HR1/HR2, C1/C2).
@@ -15,7 +39,7 @@ Documento para continuar en un hilo nuevo. Pegar en el hilo nuevo:
 - Funciona con dos bandas a la vez.
 - En todas las pantallas se ve hueco + señal (ANT+ verde / BLE azul) y batería (R6). Cadencia con el mismo criterio.
 
-## Estado (T-05 validada, versión instalada 1.6.120)
+## Estado (T-05 validada; arreglos menores en la 1.6.123, validados en parte)
 - **T-01 [x]** registro genérico `SensorDeviceRegistry`/`DeviceBook` + `PairingPolicy`.
 - **T-02 [x]** `DualSlotAllocator` (huecos fijos, ANT+ desplaza a BLE, cuarentena, `SlotStatus`).
 - **T-03 [x]** salvo prueba real de cadencia: `CadenceHub`, `CscParser`, `AntRadio` (una búsqueda ANT+
@@ -55,9 +79,13 @@ Documento para continuar en un hilo nuevo. Pegar en el hilo nuevo:
   - Nuevo: `ui/devices/DevicesSheet.kt` + `DevicesViewModel` (Hilt), `ModalBottomSheet` dentro de cada
     pantalla; `NavGraph.kt` no se toca.
 - No tocar: Room, Gradle, `NavGraph.kt`, ciclo de vida de `WorkoutService` / `FreeRideService`.
-- Pendiente visto (fuera de alcance, solo si el usuario lo pide): en Config el lápiz flotante tapa en parte el
-  interruptor del GPS; al quitar una banda ANT+ sigue dando el último valor ~10–20 s; en Ruta horizontal la
-  franja de pasos queda bajo el indicador de páginas.
+- Arreglos menores hechos antes de T-06 (detalle en `plan.md` §8, `spec.md` R2.1): valor congelado al quitar
+  una banda (ANT+ sin latidos nuevos / BLE sin contacto) y franja de pasos bajo el indicador en Ruta horizontal
+  (`MetricsGrid`). Prueba 1.6.123: suite 202/202; corte BLE "sin contacto" visto (HR2 dejó de usarse al segundo).
+  Visto: al reconectarse sola la banda quitada pasó un valor suelto (70 bpm), porque la conexión nueva aún no
+  había visto "con contacto"; sin importancia práctica. Falta lo del punto 3 de "Siguiente".
+- El "lápiz" que se ve en Config es el icono del S Pen del usuario: **no es un fallo y no se toca** (ni código ni
+  móvil, ni se apunta como pendiente).
 
 ## Observaciones de la última prueba (1.6.111 → 1.6.113)
 - Al arrancar, el receptor ANT+ a veces responde ADAPTER_NOT_DETECTED 1–2 min (del móvil/servicio ANT+; ya
@@ -79,7 +107,8 @@ Documento para continuar en un hilo nuevo. Pegar en el hilo nuevo:
 - El agente no ejecuta Gradle ni `adb install` (hook lo bloquea; ojo: también bloquea comandos de shell que
   contengan el texto "gradlew"). `adb` está en
   `C:\Users\APO\AppData\Local\Android\Sdk\platform-tools\adb.exe` (solo lectura: `devices`, `logcat`).
-  Hay dos dispositivos en `adb devices` (uno "offline"): usar `-s adb-R3CTA0JHTEZ-ORXOOh._adb-tls-connect._tcp`.
+  Hay dos entradas en `adb devices` (una "offline"): usar la que diga `device`, `-s R3CTA0JHTEZ` (así el
+  2026-11-21 tras T-05) o `-s adb-R3CTA0JHTEZ-ORXOOh._adb-tls-connect._tcp`.
 - **La evidencia la lee el agente, no se pide en capturas:** S22+ por adb inalámbrico; tras compilar el
   usuario, los tests quedan en `app/build/test-results/testDebugUnitTest/*.xml`.
 - Lecturas guardadas por segundo (HR1/HR2/cadencia): copiar la BD con

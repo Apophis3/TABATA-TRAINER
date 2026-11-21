@@ -138,6 +138,38 @@
       baterías sueltas. Horizontal: puntos HR1/HR2/C1/C2 por hueco (verde señal / naranja buscando / rojo perdido).
       La barra común `SensorBar` y la hoja "Dispositivos" son de T-06.
 
+### 8. Arreglos menores pedidos por el usuario (2026-11-21, antes de T-06)
+Los tres "pendientes vistos" en T-04/T-05. No es T-06 (que sigue sin empezar).
+- **Valor ANT+ congelado al quitar la banda (R2.1).** Sin contacto, la banda sigue emitiendo el último pulso
+  calculado 10–20 s y el plugin lo marca `LIVE_DATA`; lo que deja de avanzar es el contador de latidos
+  (`heartBeatCount`, 4.º parámetro de `onNewHeartRateData`, `long`; firma comprobada con `javap` en
+  `antpluginlib_3-9-0.aar`). `HeartRateHub` solo acepta un dato ANT+ si el contador ha cambiado (`!=`, así no
+  importa que dé la vuelta) en los últimos 3 s (`ANT_BEAT_STALL_MS`; a 25 bpm, el mínimo admitido, hay un latido
+  cada 2,4 s). Si no, no llama a `onBpm`: `lastUpdateMs` deja de avanzar y la señal deja de ser fresca a los
+  `STALE_MS` (5 s, sin cambios: lo usan el emparejado y el asignador) → el hueco pasa al BLE del mismo aparato o
+  se apaga. Lógica pura en `AntBeatWatch` (dentro de `HeartRateHub.kt`), con test. Log `💓 ANT+ …: sin latidos
+  nuevos` / `latidos de nuevo`, una vez por cambio.
+- **BLE sin contacto con la piel (R2.1).** Si no, el valor congelado pasaría de ANT+ al BLE de la misma banda.
+  En la medida de pulso BLE (0x2A37) el byte de banderas trae "contacto admitido" (bit 2, 0x04) y "contacto
+  detectado" (bit 1, 0x02). Admitido y no detectado → el dato se descarta (`bleSkinContactLost`), pero solo si
+  esa misma conexión ya ha dicho alguna vez "con contacto" (`BleContactWatch`): una banda que admite el aviso y
+  nunca lo activa sigue como antes (no se pierde su BLE, ni el respaldo ni el emparejado por valores). Bandas que
+  no admiten el bit: como hasta ahora. Log del cambio (una vez por cambio, por conexión). Tests en
+  `HrStaleValueTest` (8).
+- **Ruta horizontal: franja de pasos bajo el indicador de páginas.** En vertical quedan 60 dp libres abajo; en
+  horizontal la columna derecha se desplazaba sin margen y, con la tarjeta HR1 | HR2 de T-05 (más alta), la
+  franja quedaba bajo el indicador. Arreglo en `LandscapeMetricsPage`: la columna derecha deja de desplazarse
+  (un `BoxWithConstraints` dentro de un desplazamiento tendría alto infinito) y reserva 56 dp abajo
+  (`PAGE_INDICATOR_CLEARANCE`: indicador 40 dp + 16 dp de margen). Las dos filas de tarjetas ocupan el alto que
+  queda y el número se ajusta a él con el mismo cálculo que en vertical, extraído a `MetricsGrid` (lo usan las
+  dos orientaciones; en horizontal con relleno de tarjeta 10 dp). La franja de pasos va debajo, sin `weight`
+  (se mide antes). Cálculo para el S22 (384 dp de alto en horizontal): filas de ≈ 100 dp con pasos → número
+  ≈ 39 sp y HR1 | HR2 ≈ 25 sp; sin pasos, ≈ 130 dp. La página 3 en horizontal se vio bien en T-05: sin cambios.
+- **"Lápiz" en Config: descartado, no es un fallo** *(confirmado por el usuario 2026-11-21)*. Es el icono
+  flotante del S Pen de Samsung (Air command), que el usuario usa a diario y le es imprescindible. No tiene nada que ver
+  con la app: no se toca, ni en el código ni en el móvil, ni se vuelve a apuntar como pendiente.
+- Sin tocar Room, Gradle, `NavGraph.kt`, ciclo de vida de los servicios ni el contrato de `SensorManager`.
+
 ## Archivos
 - Nuevos: `sensor/SensorDeviceRegistry.kt`, `sensor/PairingPolicy.kt`, `sensor/DualSlotAllocator.kt`,
   `sensor/CadenceHub.kt`, `sensor/AntRadio.kt`, `sensor/CscParser.kt`, `ui/components/SensorSlotBadge.kt`, `ui/components/SensorBar.kt`,

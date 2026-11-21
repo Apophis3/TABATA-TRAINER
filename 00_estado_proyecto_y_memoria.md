@@ -6,6 +6,46 @@ memoria privada de Claude. **Lo más reciente arriba.**
 
 ---
 
+## 2026-11-21 — Spec 007 · Arreglos menores antes de T-06 (validados en parte)
+
+### Contexto
+T-01…T-05 validadas (1.6.120). El usuario pidió empezar por los "pequeños fallos detectados" (pendientes vistos
+en T-04/T-05) antes de T-06. Sin compilar ni instalar.
+
+### Hecho
+- `spec.md` R2.1 (sin valores congelados al quitar una banda); `plan.md` §8; nota en `tasks.md`. T-06 sin empezar.
+- `HeartRateHub`: un dato ANT+ solo cuenta si el contador de latidos ha cambiado en los últimos 3 s
+  (`AntBeatWatch`); sin latidos, la señal deja de ser fresca a los 5 s y el hueco pasa a BLE o se apaga. El
+  dato BLE con "sin contacto con la piel" (bits de banderas 0x2A37) se descarta, solo si esa conexión ya dijo
+  antes "con contacto" (`BleContactWatch`; una banda que nunca activa el aviso sigue como antes). Logs
+  `💓 … sin latidos nuevos` / `latidos de nuevo` / `sin contacto con la piel` / `contacto de nuevo`.
+- Nuevo test `HrStaleValueTest` (8 tests): suite esperada 202 (194 + 8).
+- `FreeRideScreen`: rejilla de tarjetas extraída a `MetricsGrid` (vertical y horizontal); en horizontal la
+  columna derecha ya no se desplaza y deja 56 dp abajo para el indicador de páginas; la franja de pasos queda
+  encima.
+- "Lápiz" de Config: el usuario confirma que es su S Pen (Air command), imprescindible en su móvil y ajeno a la app.
+  Descartado como fallo: no se toca.
+- Visto: el móvil conectado es 1440×3088 a densidad 600 (384×823 dp) y ahora sale en `adb devices` como
+  `R3CTA0JHTEZ` (el inalámbrico aparece "offline").
+
+### Prueba del usuario (1.6.123, instalada 15:23:54)
+- Tests: 202/202 verdes (`HrStaleValueTest` 8/8).
+- Ruta 2dd852b4 con dos bandas, las dos por BLE: ANT+ dio `ADAPTER_NOT_DETECTED` toda la prueba.
+- Al quitar la Decathlon (HR2): último valor 15:24:32.9 y a las 15:24:33.8 "sin contacto con la piel, no se usa
+  su valor". Desde ahí, solo HR1. El valor congelado por BLE queda resuelto.
+- Visto: la banda quitada se desconecta y reconecta sola (15:24:47 / 15:24:49) y en la conexión nueva pasó **un**
+  valor suelto (70 bpm), porque esa conexión aún no había visto "con contacto". Sin importancia práctica.
+- Sin probar: la parte ANT+ ("sin latidos nuevos") y las capturas de Ruta (horizontal con pasos y vertical tras
+  `MetricsGrid`).
+
+### Peticiones nuevas del usuario (para el hilo siguiente; formalizar antes en spec/plan)
+- Ruta página 1: si solo hay **un** pulsómetro con señal (p. ej. se quitó una de las dos bandas), una sola
+  tarjeta de pulso con el número lo más grande posible. Con dos, HR1 | HR2 como ahora.
+- Ruta página 3 (vueltas): falta la **cadencia de pasos** (pasos/min, no la de bici) en la vuelta en curso;
+  cree que hay hueco para otra casilla. Ahí le da igual que se vean los dos pulsos.
+
+---
+
 ## 2026-11-21 — Spec 007 · T-05: Ruta Libre separada (validada)
 
 ### Contexto

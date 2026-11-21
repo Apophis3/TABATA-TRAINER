@@ -43,6 +43,56 @@ data class HrDevice(
 }
 
 /**
+ * Vigila el contador de latidos de un pulsómetro ANT+ (spec 007, R2.1). Sin contacto con la piel la banda sigue
+ * emitiendo el último pulso calculado (10–20 s, marcado `LIVE_DATA`), pero el contador deja de avanzar: un
+ * dato solo cuenta si el contador ha cambiado en los últimos [stallMs]. Se compara con `!=` (da la vuelta).
+ */
+internal class AntBeatWatch(private val stallMs: Long) {
+    private var lastCount: Long? = null
+    private var lastChangeMs = 0L
+
+    /** true si sigue habiendo latidos nuevos */
+    var beating = true
+        private set
+
+    /** Registra un dato; devuelve true si [beating] ha cambiado con él (para registrarlo una vez) */
+    fun onData(beatCount: Long, now: Long): Boolean {
+        if (beatCount != lastCount) { lastCount = beatCount; lastChangeMs = now }
+        val nowBeating = now - lastChangeMs < stallMs
+        val changed = nowBeating != beating
+        beating = nowBeating
+        return changed
+    }
+}
+
+/**
+ * Medida de pulso BLE (0x2A37): el aparato admite el aviso de contacto (bit 2) y dice que no hay contacto con la
+ * piel (bit 1 a 0). Ese dato no cuenta (spec 007, R2.1). Bandas que no admiten el aviso: siempre false.
+ */
+internal fun bleSkinContactLost(data: ByteArray): Boolean = data.isNotEmpty() && (data[0].toInt() and 0x06) == 0x04
+
+/**
+ * Contacto con la piel de una conexión BLE (spec 007, R2.1). "Sin contacto" solo cuenta si esa misma conexión ya
+ * ha dicho alguna vez "con contacto": así una banda que admite el aviso pero nunca lo activa sigue como antes.
+ */
+internal class BleContactWatch {
+    private var seenContact = false
+
+    /** true si el último dato llegó sin contacto (y no cuenta) */
+    var lost = false
+        private set
+
+    /** Registra una medida; devuelve true si [lost] ha cambiado con ella (para registrarlo una vez) */
+    fun onData(data: ByteArray): Boolean {
+        if (data.isNotEmpty() && (data[0].toInt() and 0x06) == 0x06) seenContact = true
+        val nowLost = seenContact && bleSkinContactLost(data)
+        val changed = nowLost != lost
+        lost = nowLost
+        return changed
+    }
+}
+
+/**
  * Gestor único de pulsómetros ANT+ y BLE.
  *
  * - ANT+: búsqueda compartida con la cadencia ([AntRadio]) y un canal por número de dispositivo.
@@ -62,6 +112,7 @@ class HeartRateHub @Inject constructor(
 ) : AntRadioClient {
     companion object {
         const val STALE_MS = 5_000L
+        internal const val ANT_BEAT_STALL_MS = 3_000L  // sin latido nuevo en este tiempo, el dato ANT+ no cuenta (25 bpm = 2,4 s)
         private const val BLE_CONNECT_TIMEOUT_MS = 20_000L
         private const val SLOTS = 2
         private const val HISTORY = 20             // muestras (1 Hz) guardadas por dispositivo (≥ PairingThresholds.HR.minSamples)
@@ -296,8 +347,15 @@ class HeartRateHub @Inject constructor(
                             val name = pcc.deviceName?.takeIf { it.isNotBlank() } ?: displayName ?: "ANT+ $number"
                             upsert(id) { HrDevice(id, name, "ANT+", connected = true) }
                             Timber.d("💓 ANT+ $name: conectado")
-                            pcc.subscribeHeartRateDataEvent { _, _, hr, _, _, state ->
-                                if (state == AntPlusHeartRatePcc.DataState.LIVE_DATA) onBpm(id, hr)
+                            // R2.1: sin latidos nuevos (banda quitada) el valor congelado no cuenta; la señal
+                            // deja de ser fresca a los STALE_MS y el hueco pasa a BLE o se apaga
+                            val beats = AntBeatWatch(ANT_BEAT_STALL_MS)
+                            pcc.subscribeHeartRateDataEvent { _, _, hr, beatCount, _, state ->
+                                if (beats.onData(beatCount, System.currentTimeMillis())) {
+                                    Timber.d(if (beats.beating) "💓 ANT+ $name: latidos de nuevo"
+                                             else "💓 ANT+ $name: sin latidos nuevos, no se usa su valor ($hr)")
+                                }
+                                if (state == AntPlusHeartRatePcc.DataState.LIVE_DATA && beats.beating) onBpm(id, hr)
                             }
                         } else {
                             Timber.w("💓 ANT+ $number: acceso $code")
@@ -391,6 +449,8 @@ class HeartRateHub @Inject constructor(
         val id = "BLE:${device.address}"
         bleNames[device.address] = name
         val callback = object : BluetoothGattCallback() {
+            private val contact = BleContactWatch()   // R2.1
+
             override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
                     g.discoverServices()
@@ -468,7 +528,13 @@ class HeartRateHub @Inject constructor(
             private fun onNotification(ch: BluetoothGattCharacteristic, value: ByteArray) {
                 when (ch.uuid) {
                     BATTERY_LEVEL -> onBattery(id, SensorBattery.parseBleBatteryLevel(value))
-                    else -> onBpm(id, parseHr(value))
+                    else -> {
+                        if (contact.onData(value)) {
+                            Timber.d(if (contact.lost) "💓 BLE $name: sin contacto con la piel, no se usa su valor"
+                                     else "💓 BLE $name: contacto de nuevo")
+                        }
+                        if (!contact.lost) onBpm(id, parseHr(value))
+                    }
                 }
             }
         }

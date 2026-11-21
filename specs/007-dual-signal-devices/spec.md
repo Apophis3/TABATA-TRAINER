@@ -18,6 +18,9 @@ quedan fallos:
   señal que llegue. Un segundo aparato real distinto va al otro hueco.
 - **R2 — ANT+ preferente.** Si el aparato emite por ANT+ se usa ANT+; BLE solo de respaldo. Al caer ANT+
   pasa a BLE **sin cambiar de hueco**; al volver ANT+, recupera ANT+.
+  - **R2.1 — Sin valores congelados** *(petición del usuario 2026-11-21)*: al quitarse una banda, su hueco deja
+    de dar valor en ≈ 5–8 s (antes seguía con el último pulso 10–20 s). Un dato ANT+ sin latidos nuevos o un
+    dato BLE que indica "sin contacto con la piel" no cuenta como dato.
 - **R3 — Emparejado seguro.**
   - Automático **persistente** solo cuando es seguro: el nº ANT+ aparece en el nombre BLE, o en ese momento
     hay exactamente una señal ANT+ y una BLE sin emparejar del mismo tipo y sus valores coinciden (con desfase
