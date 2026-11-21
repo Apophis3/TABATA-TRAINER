@@ -6,6 +6,41 @@ memoria privada de Claude. **Lo más reciente arriba.**
 
 ---
 
+## 2026-11-21 — Spec 007 · T-05: Ruta Libre separada (validada)
+
+### Contexto
+T-04 validada (1.6.117). El usuario pidió empezar T-05 sin compilar ni instalar.
+
+### Hecho
+- `plan.md` §7 "Detalle (T-05)" anotado antes del código.
+- Nuevo `util/laps/DualSlotSamples.kt` (+ `DualSlotSamplesTest`, 7 tests): lecturas por hueco; "hueco principal"
+  = HR1/C1 y, si no tiene lecturas, HR2/C2.
+- `FreeRideService`: `FreeRideStats` con `heartRate2`, `avgHeartRate2`, `maxHeartRate2`, `isHr2Connected`,
+  `cadence2`, `avgCadence2`, `isCadence2Connected`, `cadence2Active`. Antes HR1 y HR2 se mezclaban en las medias
+  de ruta y vuelta; ahora van separadas. Escucha C2 (antes no). Vigilante de cadencia por hueco. Vueltas y
+  Room siguen con un solo valor (el del hueco principal); la sesión guarda HR2 aparte como ya hacía Tabata.
+- `FreeRideScreen`: tarjeta de pulso partida HR1 | HR2 y, si emite alguna cadencia, C1 | C2 (si no, ritmo);
+  cada mitad con hueco + ANT+/BLE + batería. Vuelta en curso con "HR1" y "HR2". Barra superior con GPS y los 4
+  huecos; en horizontal, punto por hueco.
+- Sin tocar Room, Gradle, `NavGraph.kt`, ciclo de vida del servicio, Home ni `SensorBar` (T-06).
+
+- Primera compilación falló: `TabataColors.HrCyan` es privado de `WorkoutScreen`; Ruta usa su propio
+  `HR2_COLOR` (mismo cian).
+
+### Validación (1.6.120, instalada 15:04)
+- Tests (15:03): 194/194 verdes (187 + 7 de `DualSlotSamplesTest`), 0 fallos, 0 errores.
+- Logcat: sin cierres de la app. Ruta d43a75d0 15:05:34–15:07:23; HR1 = xoss y HR2 = Decathlon 8298, ambas por
+  ANT+ (~4 lecturas/s cada una); C1/C2 escaneando sin aparato. El "Conectado a" cada segundo ya salía antes.
+- BD (copia por `run-as`): sesión con avg/max/min HR1 80/93/67 y HR2 80/92/72; `sensor_readings` 108 filas,
+  HR1 media 80,6 (68–93) y HR2 81,4 (72–92): cada banda con lo suyo, sin mezclar.
+- Capturas: vertical página 1 (barra GPS + 4 huecos con ANT+ y batería, refrescar visible; tarjeta HR1 | HR2;
+  ritmo sin cadencia), página 3 (casillas HR1 y HR2) y horizontal páginas 1 y 3: bien.
+- No probado: vueltas (0 cerradas en la prueba), C2 y cadencia real (sin sensores de cadencia).
+- Visto: en horizontal la franja de pasos queda bajo el indicador de páginas (ahora la tarjeta HR es más alta;
+  la columna se desplaza).
+
+---
+
 ## 2026-11-21 — Spec 007 · T-04: hueco y señal en Tabata y Config
 
 ### Contexto

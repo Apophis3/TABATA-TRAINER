@@ -24,6 +24,7 @@ import com.tuapp.tabatatrainer.util.laps.BlockMetrics
 import com.tuapp.tabatatrainer.util.laps.CadenceDisplayPolicy
 import com.tuapp.tabatatrainer.util.laps.CadenceSource
 import com.tuapp.tabatatrainer.util.laps.CadenceSlotMode
+import com.tuapp.tabatatrainer.util.laps.DualSlotSamples
 import com.tuapp.tabatatrainer.util.laps.KmAlert
 import com.tuapp.tabatatrainer.util.laps.KmAlertGate
 import com.tuapp.tabatatrainer.util.laps.LapBlockMetrics
@@ -52,20 +53,30 @@ data class FreeRideStats(
     val maxSpeedKmh: Float = 0f,
     val currentAltitudeM: Float = 0f,
     val elevationGainM: Float = 0f,
+    // Pulso y cadencia por hueco (spec 007, T-05): heartRate/cadence y sus medias son solo HR1/C1;
+    // HR2/C2 van en sus propios campos (antes HR2 ocupaba heartRate si faltaba HR1 y las medias se mezclaban)
     val heartRate: Int = 0,
     val avgHeartRate: Int = 0,
     val maxHeartRate: Int = 0,
+    val heartRate2: Int = 0,
+    val avgHeartRate2: Int = 0,
+    val maxHeartRate2: Int = 0,
     val cadence: Float = 0f,
     val avgCadence: Float = 0f,
+    val cadence2: Float = 0f,
+    val avgCadence2: Float = 0f,
     val gpsAccuracy: Float? = null,
     val isGpsConnected: Boolean = false,
     val isGpsScanning: Boolean = false,
     val isHrConnected: Boolean = false,
     val isHrScanning: Boolean = false,
+    val isHr2Connected: Boolean = false,
     val isCadenceConnected: Boolean = false,
     val isCadenceScanning: Boolean = false,
-    // true = el sensor de cadencia está emparejado Y emitiendo (dato en los últimos 5 s)
+    val isCadence2Connected: Boolean = false,
+    // true = el sensor de cadencia (C1 / C2) está emparejado Y emitiendo (dato en los últimos 5 s)
     val cadenceActive: Boolean = false,
+    val cadence2Active: Boolean = false,
     // Ritmo en vivo (s/km) sobre ventana de 10 s; null = sin movimiento fiable
     val paceSecPerKm: Int? = null,
     // Total de vueltas (AUTO + MANUAL)
@@ -83,7 +94,13 @@ data class FreeRideStats(
     val steps: Int = 0,
     val stepCadenceSpm: Int = 0,
     val avgStrideM: Float = 0f
-)
+) {
+    /** Algún cadenciómetro (C1 o C2) emite: la tarjeta "Cadencia / Ritmo" enseña cadencia en vez de ritmo */
+    val anyCadenceActive: Boolean get() = cadenceActive || cadence2Active
+
+    /** Cadencia que representa la vuelta en curso cuando solo cabe un valor: C1 si emite, si no C2 */
+    val primaryCadence: Float get() = if (cadenceActive || !cadence2Active) cadence else cadence2
+}
 
 data class LapData(
     val number: Int,                      // orden global de creación (AUTO y MANUAL mezcladas)
@@ -190,32 +207,29 @@ class FreeRideService : Service() {
     private var hrCollectorJob: Job? = null
     private var hr2CollectorJob: Job? = null
     private var cadenceCollectorJob: Job? = null
+    private var cadence2CollectorJob: Job? = null
     private var cadenceWatchdogJob: Job? = null
     private var gpsCollectorJob: Job? = null
 
-    // Instante (reloj de pared) del último dato del sensor de cadencia; null = ninguno vigente
-    @Volatile private var lastCadenceSampleAtMs: Long? = null
+    // Instante (reloj de pared) del último dato de C1 [0] y C2 [1]; 0 = ninguno vigente
+    private val lastCadenceSampleAtMs = java.util.concurrent.atomic.AtomicLongArray(2)
     private val paceCalculator = PaceCalculator()
 
-    private val hrReadings = mutableListOf<Int>()
-    private val hr2Readings = mutableListOf<Int>()
+    // Lecturas por hueco (spec 007, T-05): 0 = HR1/C1, 1 = HR2/C2. Ruta entera, vuelta manual y vuelta AUTO
+    private val rideHr = DualSlotSamples()
+    private val rideCadence = DualSlotSamples()
+    private val manualLapHr = DualSlotSamples()
+    private val manualLapCadence = DualSlotSamples()
+    private val autoLapHr = DualSlotSamples()
+    private val autoLapCadence = DualSlotSamples()
     // Último valor de cada pulsómetro, para guardar 1 lectura por segundo
     @Volatile private var currentHr1: Int? = null
     @Volatile private var currentHr2: Int? = null
-    private val cadenceReadings = mutableListOf<Float>()
     private val gpsPointsBuffer = mutableListOf<GpsPointEntity>()
 
-    // Para cálculo de LAPs
-    private var lastLapHrReadings = mutableListOf<Int>()
-    private var lastLapCadenceReadings = mutableListOf<Float>()
+    // Velocidad máxima de la vuelta manual y de la vuelta AUTO (cada 1 km)
     private var lastLapMaxSpeed = 0f
-    private var lastLapMaxHr = 0
-    
-    // Para Auto-Lap independiente (cada 1 km)
-    private var autoLapHrReadings = mutableListOf<Int>()
-    private var autoLapCadenceReadings = mutableListOf<Float>()
     private var autoLapMaxSpeed = 0f
-    private var autoLapMaxHr = 0
 
     private var previousAltitude: Float? = null
     private var totalElevationGain = 0f
@@ -311,223 +325,193 @@ class FreeRideService : Service() {
             }
         }
 
-        // HR1
+        // HR1 y HR2 por separado (spec 007, T-05): cada hueco con su valor, su estado y sus medias
         hrCollectorJob?.cancel()
-        hrCollectorJob = serviceScope.launch {
-            _stats.update { it.copy(isHrScanning = true) }
-            Log.d(TAG, "❤️ HR1: Iniciando flow...")
-
-            try {
-                sensorManager.observeHeartRate().catch { e ->
-                    Log.e(TAG, "❌ Error en flow HR1: ${e.message}", e)
-                    _stats.update { it.copy(isHrScanning = false, isHrConnected = false) }
-                }.collect { reading ->
-                    Log.d(TAG, "❤️ HR1 lectura recibida: ${reading::class.simpleName}")
-                    when (reading) {
-                        is HeartRateReading.Scanning -> {
-                            Log.d(TAG, "❤️ HR1: Escaneando...")
-                            _stats.update { it.copy(isHrScanning = true, isHrConnected = false) }
-                        }
-                        is HeartRateReading.Connecting -> {
-                            Log.d(TAG, "❤️ HR1: Conectando a ${reading.deviceName}...")
-                            _stats.update { it.copy(isHrScanning = true, isHrConnected = false) }
-                        }
-                        is HeartRateReading.Connected -> {
-                            Log.d(TAG, "❤️ HR1: Conectado a ${reading.deviceName}")
-                            _stats.update { it.copy(isHrScanning = false, isHrConnected = true) }
-                        }
-                        is HeartRateReading.Value -> {
-                            Log.d(TAG, "❤️ HR1: Valor recibido: ${reading.bpm} bpm")
-                            currentHr1 = reading.bpm
-                            _stats.update {
-                                it.copy(
-                                    isHrScanning = false,
-                                    isHrConnected = true,
-                                    heartRate = reading.bpm
-                                )
-                            }
-
-                            if (_stats.value.isRunning && !_stats.value.isPaused) {
-                                hrReadings.add(reading.bpm)
-                                lastLapHrReadings.add(reading.bpm)
-                                autoLapHrReadings.add(reading.bpm)
-                                if (reading.bpm > lastLapMaxHr) lastLapMaxHr = reading.bpm
-                                if (reading.bpm > autoLapMaxHr) autoLapMaxHr = reading.bpm
-
-                                val allHrReadings = hrReadings + hr2Readings
-                                val avg = if (allHrReadings.isNotEmpty()) allHrReadings.average().toInt() else 0
-                                val max = allHrReadings.maxOrNull() ?: 0
-                                _stats.update { it.copy(avgHeartRate = avg, maxHeartRate = max) }
-                            }
-                        }
-                        is HeartRateReading.Disconnected -> {
-                            currentHr1 = null
-                            Log.d(TAG, "❤️ HR1: Desconectado")
-                            _stats.update { it.copy(isHrScanning = false, isHrConnected = false) }
-                        }
-                        is HeartRateReading.Error -> {
-                            currentHr1 = null
-                            Log.e(TAG, "❤️ HR1: Error - ${reading.message}")
-                            _stats.update { it.copy(isHrScanning = false, isHrConnected = false) }
-                        }
-                        else -> {
-                            Log.d(TAG, "❤️ HR1: Estado desconocido: ${reading::class.simpleName}")
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "❌ Excepción en collector HR1: ${e.message}", e)
-                _stats.update { it.copy(isHrScanning = false, isHrConnected = false) }
-            }
-        }
-
-        // HR2 - Escuchar también HR2 para detectar pulsómetros que se conecten como segundo sensor
+        hrCollectorJob = launchHeartRateCollector(slot = 0, startDelayMs = 0L)
         hr2CollectorJob?.cancel()
-        hr2CollectorJob = serviceScope.launch {
-            delay(1000) // Pequeño delay para no interferir con HR1
-            Log.d(TAG, "❤️2 HR2: Iniciando flow...")
+        hr2CollectorJob = launchHeartRateCollector(slot = 1, startDelayMs = 1000L) // no interferir con HR1
 
-            try {
-                sensorManager.observeHeartRate2().catch { e ->
-                    Log.e(TAG, "❌ Error en flow HR2: ${e.message}", e)
-                }.collect { reading ->
-                    Log.d(TAG, "❤️2 HR2 lectura recibida: ${reading::class.simpleName}")
-                    when (reading) {
-                        is HeartRateReading.Value -> {
-                            Log.d(TAG, "❤️2 HR2: Valor recibido: ${reading.bpm} bpm")
-                            currentHr2 = reading.bpm
-                            // Si HR1 no está conectado o no tiene valor, usar HR2
-                            val currentHr = _stats.value.heartRate
-                            if (currentHr == 0 || !_stats.value.isHrConnected) {
-                                _stats.update {
-                                    it.copy(
-                                        isHrScanning = false,
-                                        isHrConnected = true,
-                                        heartRate = reading.bpm
-                                    )
-                                }
-                            }
-
-                            if (_stats.value.isRunning && !_stats.value.isPaused) {
-                                hr2Readings.add(reading.bpm)
-                                lastLapHrReadings.add(reading.bpm)
-                                autoLapHrReadings.add(reading.bpm)
-                                if (reading.bpm > lastLapMaxHr) lastLapMaxHr = reading.bpm
-                                if (reading.bpm > autoLapMaxHr) autoLapMaxHr = reading.bpm
-
-                                val allHrReadings = hrReadings + hr2Readings
-                                val avg = if (allHrReadings.isNotEmpty()) allHrReadings.average().toInt() else 0
-                                val max = allHrReadings.maxOrNull() ?: 0
-                                _stats.update { it.copy(avgHeartRate = avg, maxHeartRate = max) }
-                            }
-                        }
-                        is HeartRateReading.Connected -> {
-                            Log.d(TAG, "❤️2 HR2: Conectado a ${reading.deviceName}")
-                            // Si HR1 no está conectado, marcar como conectado usando HR2
-                            if (!_stats.value.isHrConnected) {
-                                _stats.update { it.copy(isHrScanning = false, isHrConnected = true) }
-                            }
-                        }
-                        is HeartRateReading.Disconnected -> {
-                            currentHr2 = null
-                            Log.d(TAG, "❤️2 HR2: Desconectado")
-                            // Solo actualizar si HR1 tampoco está conectado
-                            if (!_stats.value.isHrConnected) {
-                                _stats.update { it.copy(isHrScanning = false, isHrConnected = false) }
-                            }
-                        }
-                        else -> {
-                            // Otros estados no son críticos para HR2
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "❌ Excepción en collector HR2: ${e.message}", e)
-            }
-        }
-
-        // Cadencia
+        // C1 y C2 por separado: escuchar C2 es lo que arranca su hueco
         cadenceCollectorJob?.cancel()
-        cadenceCollectorJob = serviceScope.launch {
-            delay(2000)
-            _stats.update { it.copy(isCadenceScanning = true) }
-            Log.d(TAG, "🚴 Cadencia: Iniciando flow...")
+        cadenceCollectorJob = launchCadenceCollector(slot = 0, startDelayMs = 2000L)
+        cadence2CollectorJob?.cancel()
+        cadence2CollectorJob = launchCadenceCollector(slot = 1, startDelayMs = 2500L)
 
-            try {
-                sensorManager.observeCadence().catch { e ->
-                    Log.e(TAG, "❌ Error en flow Cadencia: ${e.message}", e)
-                    _stats.update { it.copy(isCadenceScanning = false, isCadenceConnected = false) }
-                }.collect { reading ->
-                    Log.d(TAG, "🚴 Cadencia lectura recibida: ${reading::class.simpleName}")
-                    when (reading) {
-                        is CadenceReading.Scanning -> {
-                            Log.d(TAG, "🚴 Cadencia: Escaneando...")
-                            _stats.update { it.copy(isCadenceScanning = true, isCadenceConnected = false) }
-                        }
-                        is CadenceReading.Connecting -> {
-                            Log.d(TAG, "🚴 Cadencia: Conectando a ${reading.deviceName}...")
-                            _stats.update { it.copy(isCadenceScanning = true, isCadenceConnected = false) }
-                        }
-                        is CadenceReading.Connected -> {
-                            Log.d(TAG, "🚴 Cadencia: Conectado a ${reading.deviceName}")
-                            _stats.update { it.copy(isCadenceScanning = false, isCadenceConnected = true) }
-                        }
-                        is CadenceReading.Value -> {
-                            Log.d(TAG, "🚴 Cadencia: Valor recibido: ${reading.rpm} rpm")
-                            lastCadenceSampleAtMs = System.currentTimeMillis()
-                            _stats.update {
-                                it.copy(
-                                    isCadenceScanning = false,
-                                    isCadenceConnected = true,
-                                    cadenceActive = true,
-                                    cadence = reading.rpm.toFloat()
-                                )
-                            }
-
-                            if (_stats.value.isRunning && !_stats.value.isPaused) {
-                                cadenceReadings.add(reading.rpm.toFloat())
-                                lastLapCadenceReadings.add(reading.rpm.toFloat())
-                                autoLapCadenceReadings.add(reading.rpm.toFloat())
-                                val avg = cadenceReadings.average().toFloat()
-                                _stats.update { it.copy(avgCadence = avg) }
-                            }
-                        }
-                        is CadenceReading.Disconnected -> {
-                            Log.d(TAG, "🚴 Cadencia: Desconectado")
-                            lastCadenceSampleAtMs = null
-                            _stats.update { it.copy(isCadenceScanning = false, isCadenceConnected = false, cadenceActive = false) }
-                        }
-                        is CadenceReading.Error -> {
-                            Log.e(TAG, "🚴 Cadencia: Error - ${reading.message}")
-                            lastCadenceSampleAtMs = null
-                            _stats.update { it.copy(isCadenceScanning = false, isCadenceConnected = false, cadenceActive = false) }
-                        }
-                        else -> {
-                            Log.d(TAG, "🚴 Cadencia: Estado desconocido: ${reading::class.simpleName}")
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "❌ Excepción en collector Cadencia: ${e.message}", e)
-                _stats.update { it.copy(isCadenceScanning = false, isCadenceConnected = false) }
-            }
-        }
-
-        // Vigilante: sin datos recientes del sensor la cadencia cede el hueco al ritmo (y viceversa)
+        // Vigilante: sin datos recientes del sensor la cadencia cede el hueco al ritmo (y viceversa), por hueco
         cadenceWatchdogJob?.cancel()
         cadenceWatchdogJob = serviceScope.launch {
             while (isActive) {
                 delay(1000)
-                val active = CadenceDisplayPolicy.mode(
-                    paired = _stats.value.isCadenceConnected,
-                    lastSampleAtMs = lastCadenceSampleAtMs,
-                    nowMs = System.currentTimeMillis()
-                ) == CadenceSlotMode.CADENCE
-                _stats.update { it.copy(cadenceActive = active) }
+                val now = System.currentTimeMillis()
+                val s = _stats.value
+                val active1 = isCadenceEmitting(0, s.isCadenceConnected, now)
+                val active2 = isCadenceEmitting(1, s.isCadence2Connected, now)
+                _stats.update { it.copy(cadenceActive = active1, cadence2Active = active2) }
             }
         }
 
         updateNotification("Ruta Libre", "Sensores listos - Pulsa iniciar")
+    }
+
+    /**
+     * Escucha un hueco de pulso (0 = HR1, 1 = HR2). Cada hueco escribe solo sus campos; HR1 lleva además el
+     * indicador de búsqueda (`isHrScanning`).
+     */
+    private fun launchHeartRateCollector(slot: Int, startDelayMs: Long): Job = serviceScope.launch {
+        if (startDelayMs > 0) delay(startDelayMs)
+        val tag = if (slot == 0) "❤️ HR1" else "❤️2 HR2"
+        if (slot == 0) _stats.update { it.copy(isHrScanning = true) }
+        Log.d(TAG, "$tag: Iniciando flow...")
+        val flow = if (slot == 0) sensorManager.observeHeartRate() else sensorManager.observeHeartRate2()
+        try {
+            flow.catch { e ->
+                Log.e(TAG, "❌ Error en flow $tag: ${e.message}", e)
+                setHeartRateState(slot, connected = false, scanning = false)
+            }.collect { reading ->
+                when (reading) {
+                    is HeartRateReading.Scanning -> {
+                        Log.d(TAG, "$tag: Escaneando...")
+                        setHeartRateState(slot, connected = false, scanning = true)
+                    }
+                    is HeartRateReading.Connecting -> {
+                        Log.d(TAG, "$tag: Conectando a ${reading.deviceName}...")
+                        setHeartRateState(slot, connected = false, scanning = true)
+                    }
+                    is HeartRateReading.Connected -> {
+                        Log.d(TAG, "$tag: Conectado a ${reading.deviceName}")
+                        setHeartRateState(slot, connected = true, scanning = false)
+                    }
+                    is HeartRateReading.Value -> {
+                        Log.d(TAG, "$tag: Valor recibido: ${reading.bpm} bpm")
+                        if (slot == 0) currentHr1 = reading.bpm else currentHr2 = reading.bpm
+                        _stats.update {
+                            if (slot == 0) it.copy(isHrScanning = false, isHrConnected = true, heartRate = reading.bpm)
+                            else it.copy(isHr2Connected = true, heartRate2 = reading.bpm)
+                        }
+                        recordHeartRate(slot, reading.bpm)
+                    }
+                    is HeartRateReading.Disconnected -> {
+                        if (slot == 0) currentHr1 = null else currentHr2 = null
+                        Log.d(TAG, "$tag: Desconectado")
+                        setHeartRateState(slot, connected = false, scanning = false)
+                    }
+                    is HeartRateReading.Error -> {
+                        if (slot == 0) currentHr1 = null else currentHr2 = null
+                        Log.e(TAG, "$tag: Error - ${reading.message}")
+                        setHeartRateState(slot, connected = false, scanning = false)
+                    }
+                    else -> Log.d(TAG, "$tag: Estado desconocido: ${reading::class.simpleName}")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Excepción en collector $tag: ${e.message}", e)
+            setHeartRateState(slot, connected = false, scanning = false)
+        }
+    }
+
+    private fun setHeartRateState(slot: Int, connected: Boolean, scanning: Boolean) = _stats.update {
+        if (slot == 0) it.copy(isHrConnected = connected, isHrScanning = scanning) else it.copy(isHr2Connected = connected)
+    }
+
+    /** Lectura de pulso en ruta: suma a la ruta, a la vuelta manual y a la AUTO de su hueco; medias sin mezclar */
+    private fun recordHeartRate(slot: Int, bpm: Int) {
+        val s = _stats.value
+        if (!s.isRunning || s.isPaused) return
+        val v = bpm.toFloat()
+        rideHr.add(slot, v)
+        manualLapHr.add(slot, v)
+        autoLapHr.add(slot, v)
+        val avg = rideHr.avg(slot)?.toInt() ?: 0
+        val max = rideHr.max(slot)?.toInt() ?: 0
+        _stats.update {
+            if (slot == 0) it.copy(avgHeartRate = avg, maxHeartRate = max)
+            else it.copy(avgHeartRate2 = avg, maxHeartRate2 = max)
+        }
+    }
+
+    /** Escucha un hueco de cadencia (0 = C1, 1 = C2). 0 rpm con señal es un dato válido */
+    private fun launchCadenceCollector(slot: Int, startDelayMs: Long): Job = serviceScope.launch {
+        if (startDelayMs > 0) delay(startDelayMs)
+        val tag = if (slot == 0) "🚴 C1" else "🚴2 C2"
+        if (slot == 0) _stats.update { it.copy(isCadenceScanning = true) }
+        Log.d(TAG, "$tag: Iniciando flow...")
+        val flow = if (slot == 0) sensorManager.observeCadence() else sensorManager.observeCadence2()
+        try {
+            flow.catch { e ->
+                Log.e(TAG, "❌ Error en flow $tag: ${e.message}", e)
+                setCadenceState(slot, connected = false, scanning = false)
+            }.collect { reading ->
+                when (reading) {
+                    is CadenceReading.Scanning -> {
+                        Log.d(TAG, "$tag: Escaneando...")
+                        setCadenceState(slot, connected = false, scanning = true)
+                    }
+                    is CadenceReading.Connecting -> {
+                        Log.d(TAG, "$tag: Conectando a ${reading.deviceName}...")
+                        setCadenceState(slot, connected = false, scanning = true)
+                    }
+                    is CadenceReading.Connected -> {
+                        Log.d(TAG, "$tag: Conectado a ${reading.deviceName}")
+                        setCadenceState(slot, connected = true, scanning = false)
+                    }
+                    is CadenceReading.Value -> {
+                        Log.d(TAG, "$tag: Valor recibido: ${reading.rpm} rpm")
+                        val rpm = reading.rpm.toFloat()
+                        lastCadenceSampleAtMs.set(slot, System.currentTimeMillis())
+                        _stats.update {
+                            if (slot == 0) {
+                                it.copy(isCadenceScanning = false, isCadenceConnected = true, cadenceActive = true, cadence = rpm)
+                            } else {
+                                it.copy(isCadence2Connected = true, cadence2Active = true, cadence2 = rpm)
+                            }
+                        }
+                        recordCadence(slot, rpm)
+                    }
+                    is CadenceReading.Disconnected -> {
+                        Log.d(TAG, "$tag: Desconectado")
+                        lastCadenceSampleAtMs.set(slot, 0L)
+                        setCadenceState(slot, connected = false, scanning = false)
+                    }
+                    is CadenceReading.Error -> {
+                        Log.e(TAG, "$tag: Error - ${reading.message}")
+                        lastCadenceSampleAtMs.set(slot, 0L)
+                        setCadenceState(slot, connected = false, scanning = false)
+                    }
+                    else -> Log.d(TAG, "$tag: Estado desconocido: ${reading::class.simpleName}")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Excepción en collector $tag: ${e.message}", e)
+            setCadenceState(slot, connected = false, scanning = false)
+        }
+    }
+
+    /** Sin conexión el hueco deja de contar como "emitiendo" en el acto (no espera al vigilante) */
+    private fun setCadenceState(slot: Int, connected: Boolean, scanning: Boolean) = _stats.update {
+        if (slot == 0) {
+            it.copy(isCadenceConnected = connected, isCadenceScanning = scanning,
+                cadenceActive = it.cadenceActive && connected)
+        } else {
+            it.copy(isCadence2Connected = connected, cadence2Active = it.cadence2Active && connected)
+        }
+    }
+
+    private fun isCadenceEmitting(slot: Int, paired: Boolean, nowMs: Long): Boolean =
+        CadenceDisplayPolicy.mode(
+            paired = paired,
+            lastSampleAtMs = lastCadenceSampleAtMs.get(slot).takeIf { it > 0L },
+            nowMs = nowMs
+        ) == CadenceSlotMode.CADENCE
+
+    /** Lectura de cadencia en ruta: suma a la ruta, a la vuelta manual y a la AUTO de su hueco */
+    private fun recordCadence(slot: Int, rpm: Float) {
+        val s = _stats.value
+        if (!s.isRunning || s.isPaused) return
+        rideCadence.add(slot, rpm)
+        manualLapCadence.add(slot, rpm)
+        autoLapCadence.add(slot, rpm)
+        val avg = rideCadence.avg(slot) ?: 0f
+        _stats.update { if (slot == 0) it.copy(avgCadence = avg) else it.copy(avgCadence2 = avg) }
     }
 
     fun reconnectSensors() {
@@ -552,11 +536,10 @@ class FreeRideService : Service() {
         Log.d(TAG, "📍 GPS estado: conectado=${_stats.value.isGpsConnected}, scanning=${_stats.value.isGpsScanning}")
 
         currentSessionId = UUID.randomUUID().toString()
-        hrReadings.clear()
-        hr2Readings.clear()
+        rideHr.clear()
+        rideCadence.clear()
         currentHr1 = null
         currentHr2 = null
-        cadenceReadings.clear()
         paceCalculator.reset()
         gpsPointsBuffer.clear()
         _laps.update { emptyList() }
@@ -603,6 +586,10 @@ class FreeRideService : Service() {
                 maxSpeedKmh = 0f,
                 avgHeartRate = 0,
                 maxHeartRate = 0,
+                avgHeartRate2 = 0,
+                maxHeartRate2 = 0,
+                avgCadence = 0f,
+                avgCadence2 = 0f,
                 elevationGainM = 0f,
                 steps = 0,
                 stepCadenceSpm = 0,
@@ -690,10 +677,9 @@ class FreeRideService : Service() {
         val lap = record.toLapData(
             avgSpeedKmh = speedOf(record.distanceMeters, record.durationSeconds),
             maxSpeedKmh = lastLapMaxSpeed,
-            hrReadings = lastLapHrReadings,
-            maxHr = lastLapMaxHr,
-            cadenceReadings = lastLapCadenceReadings,
-            metrics = LapBlockMetrics.of(manualWindowStartCounters, endCounters, lastLapCadenceReadings.isNotEmpty())
+            hr = manualLapHr,
+            cadence = manualLapCadence,
+            metrics = LapBlockMetrics.of(manualWindowStartCounters, endCounters, !manualLapCadence.isEmpty())
         )
         _laps.update { it + lap }
         resetLapCounters()   // solo la serie manual; NO afecta a las AUTO
@@ -720,7 +706,7 @@ class FreeRideService : Service() {
         val endCounters = currentCounters()
         // Si un hueco de GPS cruza varios km de golpe, los pasos/desnivel no se pueden repartir entre ellos
         // con fiabilidad: esas vueltas quedan sin dato (`--`) en vez de duplicar o inventar la cifra
-        val bikeUsed = autoLapCadenceReadings.isNotEmpty()
+        val bikeUsed = !autoLapCadence.isEmpty()
         val metrics = if (inGpsJump) {
             BlockMetrics(steps = null, elevationGain = null,
                 cadenceSource = if (bikeUsed) CadenceSource.BIKE_SENSOR else CadenceSource.NONE)
@@ -730,9 +716,8 @@ class FreeRideService : Service() {
         val lap = record.toLapData(
             avgSpeedKmh = speedOf(record.distanceMeters, record.durationSeconds),
             maxSpeedKmh = autoLapMaxSpeed,
-            hrReadings = autoLapHrReadings,
-            maxHr = autoLapMaxHr,
-            cadenceReadings = autoLapCadenceReadings,
+            hr = autoLapHr,
+            cadence = autoLapCadence,
             metrics = metrics
         )
         _laps.update { it + lap }
@@ -765,9 +750,8 @@ class FreeRideService : Service() {
     private fun LapRecord.toLapData(
         avgSpeedKmh: Float,
         maxSpeedKmh: Float,
-        hrReadings: List<Int>,
-        maxHr: Int,
-        cadenceReadings: List<Float>,
+        hr: DualSlotSamples,
+        cadence: DualSlotSamples,
         metrics: BlockMetrics
     ) = LapData(
         number = order,
@@ -779,9 +763,10 @@ class FreeRideService : Service() {
         startDistanceMeters = startMeters,
         avgSpeedKmh = avgSpeedKmh,
         maxSpeedKmh = maxSpeedKmh,
-        avgHeartRate = if (hrReadings.isNotEmpty()) hrReadings.average().toInt() else 0,
-        maxHeartRate = maxHr,
-        avgCadence = if (cadenceReadings.isNotEmpty()) cadenceReadings.average().toFloat() else 0f,
+        // Una vuelta guarda un solo pulso y una sola cadencia (Room): HR1/C1 si hay lecturas, si no HR2/C2
+        avgHeartRate = hr.primaryAvg()?.toInt() ?: 0,
+        maxHeartRate = hr.primaryMax()?.toInt() ?: 0,
+        avgCadence = cadence.primaryAvg() ?: 0f,
         // avgCadence = rpm del sensor de pedal; la cadencia de carrera (ppm) se deriva de pasos y duración
         steps = metrics.steps,
         elevationGain = metrics.elevationGain,
@@ -814,17 +799,15 @@ class FreeRideService : Service() {
     }
 
     private fun resetLapCounters() {
-        lastLapHrReadings.clear()
-        lastLapCadenceReadings.clear()
+        manualLapHr.clear()
+        manualLapCadence.clear()
         lastLapMaxSpeed = 0f
-        lastLapMaxHr = 0
     }
-    
+
     private fun resetAutoLapCounters() {
-        autoLapHrReadings.clear()
-        autoLapCadenceReadings.clear()
+        autoLapHr.clear()
+        autoLapCadence.clear()
         autoLapMaxSpeed = 0f
-        autoLapMaxHr = 0
     }
 
     fun resetToIdle() {
@@ -832,10 +815,15 @@ class FreeRideService : Service() {
             FreeRideStats(
                 isGpsConnected = it.isGpsConnected,
                 isHrConnected = it.isHrConnected,
+                isHr2Connected = it.isHr2Connected,
                 isCadenceConnected = it.isCadenceConnected,
+                isCadence2Connected = it.isCadence2Connected,
                 cadenceActive = it.cadenceActive,
+                cadence2Active = it.cadence2Active,
                 heartRate = it.heartRate,
-                cadence = it.cadence
+                heartRate2 = it.heartRate2,
+                cadence = it.cadence,
+                cadence2 = it.cadence2
             )
         }
         _laps.update { emptyList() }
@@ -1053,22 +1041,23 @@ class FreeRideService : Service() {
         currentSessionId?.let { sessionId ->
             val stats = _stats.value
             val gpsStats = gpsManager.getCurrentStats()
+            val hrBoth = rideHr.count(0) > 0   // HR2 solo va aparte si también hubo HR1
 
             sessionDao.getSessionById(sessionId)?.let { session ->
                 sessionDao.updateSession(
                     session.copy(
                         endTime = System.currentTimeMillis(),
                         totalTimeSeconds = stats.totalTimeSeconds,
-                        // HR1 y HR2 por separado (antes se mezclaban en una sola media)
-                        avgHeartRate = hrReadings.takeIf { it.isNotEmpty() }?.average()?.toInt()
-                            ?: hr2Readings.takeIf { it.isNotEmpty() }?.average()?.toInt(),
-                        maxHeartRate = hrReadings.maxOrNull() ?: hr2Readings.maxOrNull(),
-                        minHeartRate = (hrReadings.ifEmpty { hr2Readings }).filter { it > 0 }.minOrNull(),
-                        avgHeartRate2 = if (hrReadings.isNotEmpty()) hr2Readings.takeIf { it.isNotEmpty() }?.average()?.toInt() else null,
-                        maxHeartRate2 = if (hrReadings.isNotEmpty()) hr2Readings.maxOrNull() else null,
-                        minHeartRate2 = if (hrReadings.isNotEmpty()) hr2Readings.filter { it > 0 }.minOrNull() else null,
-                        avgCadence = if (cadenceReadings.isNotEmpty()) cadenceReadings.average().toFloat() else null,
-                        maxCadence = cadenceReadings.maxOrNull(),
+                        // HR1 y HR2 por separado; si solo hubo HR2, va en las columnas de HR1 (como antes)
+                        avgHeartRate = rideHr.primaryAvg()?.toInt(),
+                        maxHeartRate = rideHr.primaryMax()?.toInt(),
+                        minHeartRate = rideHr.primarySlot()?.let { rideHr.minPositive(it) }?.toInt(),
+                        avgHeartRate2 = if (hrBoth) rideHr.avg(1)?.toInt() else null,
+                        maxHeartRate2 = if (hrBoth) rideHr.max(1)?.toInt() else null,
+                        minHeartRate2 = if (hrBoth) rideHr.minPositive(1)?.toInt() else null,
+                        // Room guarda una sola cadencia: C1, si no C2 (C2 en vivo solo, R7)
+                        avgCadence = rideCadence.primaryAvg(),
+                        maxCadence = rideCadence.primaryMax(),
                         totalDistanceMeters = gpsStats.totalDistanceMeters,
                         avgSpeedKmh = gpsStats.avgSpeedKmh,
                         maxSpeedKmh = gpsStats.maxSpeedKmh,
@@ -1107,6 +1096,7 @@ class FreeRideService : Service() {
         hrCollectorJob?.cancel()
         hr2CollectorJob?.cancel()
         cadenceCollectorJob?.cancel()
+        cadence2CollectorJob?.cancel()
         cadenceWatchdogJob?.cancel()
         gpsCollectorJob?.cancel()
     }

@@ -2,10 +2,9 @@
 
 Documento para continuar en un hilo nuevo. Pegar en el hilo nuevo:
 
-> Lee `AGENTS.md`, `docs/constitution.md`, `specs/007-dual-signal-devices/{spec.md, plan.md, tasks.md, traspaso.md}`
-> y la primera entrada de `00_estado_proyecto_y_memoria.md`. Seguimos con la spec 007 en la rama
-> `spec-007-dual-signal-devices`. Empieza T-05 (Ruta Libre separada). Valida con mis pruebas (lee tú
-> los resultados de tests y el Logcat del móvil). No compiles ni instales (lo hago yo).
+> Spec 007, rama `spec-007-dual-signal-devices`. T-05 validada. Toca T-06: hoja "Dispositivos" común + Home
+> (ver `tasks.md` y `plan.md`, R8.1–R8.3). Reglas en `AGENTS.md`. Anota el detalle en `plan.md` antes del
+> código. Valida con mis pruebas (lee tú los tests y el Logcat del móvil). No compiles ni instales (lo hago yo).
 
 ## Objetivo de la spec
 - Un aparato físico (pulsómetro o cadenciómetro, emite por ANT+ y BLE) = un hueco fijo (HR1/HR2, C1/C2).
@@ -13,7 +12,7 @@ Documento para continuar en un hilo nuevo. Pegar en el hilo nuevo:
 - Funciona con dos bandas a la vez.
 - En todas las pantallas se ve hueco + señal (ANT+ verde / BLE azul) y batería (R6). Cadencia con el mismo criterio.
 
-## Estado (último commit `59e02ae`, versión instalada 1.6.117)
+## Estado (T-05 validada, versión instalada 1.6.120)
 - **T-01 [x]** registro genérico `SensorDeviceRegistry`/`DeviceBook` + `PairingPolicy`.
 - **T-02 [x]** `DualSlotAllocator` (huecos fijos, ANT+ desplaza a BLE, cuarentena, `SlotStatus`).
 - **T-03 [x]** salvo prueba real de cadencia: `CadenceHub`, `CscParser`, `AntRadio` (una búsqueda ANT+
@@ -25,7 +24,13 @@ Documento para continuar en un hilo nuevo. Pegar en el hilo nuevo:
   `SensorManager.hrSlotStatus/cadenceSlotStatus`; `ui/components/SensorSlotBadge.kt` (`ProtocolBadge`,
   `SensorSlotBadge`, `SensorSlotsViewModel` + `rememberSensorSlots()`, `SlotStatus.signalState`); Tabata con
   señal/batería/punto desde `SlotStatus` y barra superior apartada de la flecha; Config con rejilla HR1 HR2 / C1 C2.
-  Detalle en `plan.md` §7. Siguiente: T-05. T-06 y T-07 sin empezar. Una tarea cada vez.
+  Detalle en `plan.md` §7.
+- **T-05 [x]** validada 2026-11-21 con la 1.6.120 (suite 194/194; ruta con dos bandas; BD con HR1/HR2
+  separados): `util/laps/DualSlotSamples`; `FreeRideStats` con HR2/C2; colector C2; Ruta con tarjeta HR1 | HR2,
+  C1 | C2 si hay cadencia, vuelta en curso con HR1/HR2 y barra con los 4 huecos (`SensorSlotBadge`). Pendiente
+  para T-07: probar cierre de vueltas con dos bandas, C2 y cadencia real. Detalle en `plan.md` §7 "Detalle (T-05)".
+  Siguiente: T-06 (hoja "Dispositivos" + Home + `SensorBar` común; la barra de Ruta de T-05 pasa a `SensorBar`).
+  T-07 sin empezar. Una tarea cada vez.
 
 ## T-05 — punto de partida (Ruta Libre separada, R7)
 - Qué pide (`tasks.md`, `plan.md` "Ruta"): HR1/HR2 y C1/C2 por separado con su señal y batería, como Tabata;

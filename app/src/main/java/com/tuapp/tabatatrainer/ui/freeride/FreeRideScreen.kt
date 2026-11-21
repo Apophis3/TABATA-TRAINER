@@ -42,6 +42,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -54,9 +55,13 @@ import com.tuapp.tabatatrainer.service.FreeRideService
 import com.tuapp.tabatatrainer.service.FreeRideStats
 import com.tuapp.tabatatrainer.service.LapData
 import com.tuapp.tabatatrainer.service.MapPoint
-import com.tuapp.tabatatrainer.ui.components.BatteryBadge
+import com.tuapp.tabatatrainer.sensor.SlotStatus
 import com.tuapp.tabatatrainer.ui.components.BatteryLowWarnings
-import com.tuapp.tabatatrainer.ui.components.rememberSensorBatteries
+import com.tuapp.tabatatrainer.ui.components.SENSOR_SLOT_LABELS
+import com.tuapp.tabatatrainer.ui.components.SensorSlotBadge
+import com.tuapp.tabatatrainer.ui.components.SlotSignalState
+import com.tuapp.tabatatrainer.ui.components.rememberSensorSlots
+import com.tuapp.tabatatrainer.ui.components.signalState
 import com.tuapp.tabatatrainer.ui.theme.TabataColors
 import com.tuapp.tabatatrainer.ui.theme.TabataSizes
 import com.tuapp.tabatatrainer.util.laps.CadenceDisplayPolicy
@@ -315,6 +320,10 @@ private fun MetricsPage(
                 val valueLine = rowHeight - cardPadding * 2 - 4.dp - 24.dp
                 val valueFontSize = with(density) { (valueLine / 1.3f).toSp() }
                     .value.coerceIn(28f, 55f).sp
+                // Fila de pulso y cadencia: cada mitad lleva debajo hueco + señal + batería (~18 dp más)
+                val splitFontSize = with(density) { ((valueLine - 18.dp) / 1.3f).toSp() }
+                    .value.coerceIn(24f, 55f).sp
+                val slots = rememberSensorSlots()
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         LapMetricCardNoIcon(
@@ -334,17 +343,13 @@ private fun MetricsPage(
                             modifier = Modifier.weight(1f)
                         )
                     }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        LapMetricCardNoIcon(
-                            value = if (stats.heartRate > 0) "${stats.heartRate}" else "--",
-                            unit = "bpm",
-                            label = "HR",
-                            valueColor = if (stats.isHrConnected) Color(0xFFE91E63) else Color.Gray,
-                            valueFontSize = valueFontSize,
-                            contentPadding = cardPadding,
-                            modifier = Modifier.weight(1f)
-                        )
-                        CadencePaceCard(stats, Modifier.weight(1f), valueFontSize, cardPadding)
+                    // Alto fijo de fila: las dos tarjetas igual de altas aunque una vaya partida y la otra no
+                    Row(
+                        Modifier.fillMaxWidth().height(rowHeight),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        HeartRateSplitCard(stats, slots, Modifier.weight(1f).fillMaxHeight(), splitFontSize, cardPadding)
+                        CadencePaceCard(stats, slots, Modifier.weight(1f).fillMaxHeight(), splitFontSize, cardPadding)
                     }
                 }
             }
@@ -694,15 +699,18 @@ private fun LapsPage(stats: FreeRideStats, laps: List<LapData>, onLap: () -> Uni
 /** Un dato de la rejilla de la vuelta en curso */
 private data class LapStat(val value: String, val unit: String, val label: String, val color: Color = Color.White)
 
-/** Datos de la vuelta manual en curso, en el orden de lectura: tiempo, distancia, ritmo, velocidad, FC, pasos, cadencia, desnivel+ */
+/**
+ * Datos de la vuelta manual en curso, en el orden de lectura: tiempo, distancia, ritmo, velocidad, HR1, HR2, pasos,
+ * cadencia, desnivel+. La cadencia es C1 y, si C1 no emite, C2 (spec 007, T-05).
+ */
 private fun currentLapStats(stats: FreeRideStats): List<LapStat> {
     val lap = CurrentLapModel.of(
         lapSeconds = stats.currentLapTimeSeconds,
         lapMeters = stats.currentLapDistanceMeters,
         lapSteps = stats.currentLapSteps,
         lapElevationGainM = stats.currentLapElevationGainM,
-        cadenceActive = stats.cadenceActive,
-        cadenceRpm = stats.cadence
+        cadenceActive = stats.anyCadenceActive,
+        cadenceRpm = stats.primaryCadence
     )
     return listOf(
         LapStat(formatDuration(stats.currentLapTimeSeconds), "", "Tiempo"),
@@ -710,8 +718,12 @@ private fun currentLapStats(stats: FreeRideStats): List<LapStat> {
         LapStat(lap.pace, "min/km", "Ritmo vuelta"),
         LapStat(if (stats.currentSpeedKmh > 0.5f) String.format("%.1f", stats.currentSpeedKmh) else "--", "km/h", "Velocidad"),
         LapStat(
-            if (stats.heartRate > 0) "${stats.heartRate}" else "--", "bpm", "HR",
-            if (stats.isHrConnected) Color(0xFFE91E63) else Color.Gray
+            if (stats.heartRate > 0) "${stats.heartRate}" else "--", "bpm", "HR1",
+            if (stats.isHrConnected) HR1_COLOR else Color.Gray
+        ),
+        LapStat(
+            if (stats.heartRate2 > 0) "${stats.heartRate2}" else "--", "bpm", "HR2",
+            if (stats.isHr2Connected) HR2_COLOR else Color.Gray
         ),
         LapStat(lap.steps, "", "Pasos"),
         LapStat(lap.cadenceValue, lap.cadenceUnit, "Cadencia"),
@@ -814,18 +826,74 @@ private fun StepsStripItem(value: String, unit: String, label: String, modifier:
     }
 }
 
+private val HR1_COLOR = Color(0xFFE91E63)
+private val HR2_COLOR = Color(0xFF00BCD4) // mismo cian que HR2 en Tabata
+
+/** Tarjeta de pulso partida HR1 | HR2 (spec 007, T-05): cada banda con su valor, su señal y su batería */
+@Composable
+private fun HeartRateSplitCard(
+    stats: FreeRideStats,
+    slots: List<SlotStatus>,
+    modifier: Modifier = Modifier,
+    valueFontSize: TextUnit = 55.sp,
+    contentPadding: Dp = 16.dp
+) {
+    SplitMetricCard(
+        left = SlotHalf(
+            value = if (stats.heartRate > 0) "${stats.heartRate}" else "--",
+            unit = "bpm",
+            label = SENSOR_SLOT_LABELS[0],
+            color = if (stats.isHrConnected) HR1_COLOR else Color.Gray,
+            status = slots.getOrNull(0)
+        ),
+        right = SlotHalf(
+            value = if (stats.heartRate2 > 0) "${stats.heartRate2}" else "--",
+            unit = "bpm",
+            label = SENSOR_SLOT_LABELS[1],
+            color = if (stats.isHr2Connected) HR2_COLOR else Color.Gray,
+            status = slots.getOrNull(1)
+        ),
+        valueFontSize = valueFontSize,
+        contentPadding = contentPadding,
+        modifier = modifier
+    )
+}
+
 /**
- * Hueco "Cadencia / Ritmo": cadencia del sensor (rpm) mientras emite; si no hay sensor
- * o deja de emitir, ritmo en min/km. La conmutación sale de [FreeRideStats.cadenceActive].
+ * Hueco "Cadencia / Ritmo": si C1 o C2 emiten, tarjeta partida C1 | C2 en rpm (spec 007, T-05); si ninguno
+ * emite, ritmo en min/km. La conmutación sale de [FreeRideStats.cadenceActive] / [FreeRideStats.cadence2Active].
  */
 @Composable
 private fun CadencePaceCard(
     stats: FreeRideStats,
+    slots: List<SlotStatus>,
     modifier: Modifier = Modifier,
     valueFontSize: TextUnit = 55.sp,
-    contentPadding: androidx.compose.ui.unit.Dp = 16.dp
+    contentPadding: Dp = 16.dp
 ) {
-    val slot = CadenceDisplayPolicy.slot(stats.cadenceActive, stats.cadence, stats.paceSecPerKm)
+    if (stats.anyCadenceActive) {
+        SplitMetricCard(
+            left = SlotHalf(
+                value = if (stats.cadenceActive) "%.0f".format(stats.cadence) else "--",
+                unit = "rpm",
+                label = SENSOR_SLOT_LABELS[2],
+                color = if (stats.cadenceActive) Color.White else Color.Gray,
+                status = slots.getOrNull(2)
+            ),
+            right = SlotHalf(
+                value = if (stats.cadence2Active) "%.0f".format(stats.cadence2) else "--",
+                unit = "rpm",
+                label = SENSOR_SLOT_LABELS[3],
+                color = if (stats.cadence2Active) Color.White else Color.Gray,
+                status = slots.getOrNull(3)
+            ),
+            valueFontSize = valueFontSize,
+            contentPadding = contentPadding,
+            modifier = modifier
+        )
+        return
+    }
+    val slot = CadenceDisplayPolicy.slot(false, 0f, stats.paceSecPerKm)
     LapMetricCardNoIcon(
         value = slot.value,
         unit = slot.unit,
@@ -834,6 +902,110 @@ private fun CadencePaceCard(
         contentPadding = contentPadding,
         modifier = modifier
     )
+}
+
+/** Mitad de una tarjeta partida: valor de un hueco con su etiqueta (HR1, C2…), señal y batería */
+private data class SlotHalf(
+    val value: String,
+    val unit: String,
+    val label: String,
+    val color: Color,
+    val status: SlotStatus?
+)
+
+/** Tarjeta con dos huecos lado a lado (HR1 | HR2, C1 | C2), mismo estilo que [LapMetricCardNoIcon] */
+@Composable
+private fun SplitMetricCard(
+    left: SlotHalf,
+    right: SlotHalf,
+    valueFontSize: TextUnit,
+    contentPadding: Dp,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.3f)),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = contentPadding / 2, vertical = contentPadding)
+        ) {
+            SplitMetricHalf(left, valueFontSize, Modifier.weight(1f))
+            Box(
+                Modifier
+                    .align(Alignment.CenterVertically)
+                    .padding(horizontal = 4.dp)
+                    .width(1.dp)
+                    .height(valueFontSize.value.dp)
+                    .background(Color.White.copy(alpha = 0.15f))
+            )
+            SplitMetricHalf(right, valueFontSize, Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun SplitMetricHalf(half: SlotHalf, valueFontSize: TextUnit, modifier: Modifier) {
+    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.Bottom
+        ) {
+            BasicText(
+                text = half.value,
+                style = TextStyle(fontWeight = FontWeight.Bold, color = half.color),
+                maxLines = 1,
+                softWrap = false,
+                autoSize = TextAutoSize.StepBased(
+                    minFontSize = 14.sp,
+                    maxFontSize = valueFontSize,
+                    stepSize = 1.sp
+                ),
+                modifier = Modifier.weight(1f, fill = false)
+            )
+            Text(
+                " ${half.unit}",
+                fontSize = 11.sp,
+                color = Color.White.copy(alpha = 0.6f),
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        SensorSlotBadge(
+            label = half.label,
+            status = half.status,
+            labelColor = Color.White.copy(alpha = 0.5f),
+            fontSize = 11.sp,
+            stacked = true
+        )
+    }
+}
+
+/** Color del punto o etiqueta de un hueco: verde con señal, naranja buscando, rojo con su aparato sin señal */
+private fun slotSignalColor(status: SlotStatus?): Color = when (status?.signalState) {
+    SlotSignalState.SIGNAL -> TabataColors.Connected
+    SlotSignalState.LOST -> TabataColors.RestRed
+    else -> Color(0xFFFFA500)
+}
+
+/** Fila compacta para apaisado: GPS y un punto por hueco (HR1, HR2, C1, C2) */
+@Composable
+private fun CompactSensorRow(stats: FreeRideStats, slots: List<SlotStatus>) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        SensorDot(Icons.Default.GpsFixed, stats.isGpsConnected, stats.isGpsScanning, TabataColors.WorkGreen)
+        SENSOR_SLOT_LABELS.forEachIndexed { i, label ->
+            val c = slotSignalColor(slots.getOrNull(i))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                Box(Modifier.size(8.dp).background(c, CircleShape))
+                Text(label, fontSize = 10.sp, color = c, maxLines = 1)
+            }
+        }
+    }
 }
 
 @Composable
@@ -930,6 +1102,7 @@ private fun LandscapeMetricsPage(
     onLap: () -> Unit,
     onReconnect: () -> Unit
 ) {
+    val slots = rememberSensorSlots()
     Row(
         modifier = Modifier
             .fillMaxSize()
@@ -944,12 +1117,8 @@ private fun LandscapeMetricsPage(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceEvenly
         ) {
-            // Sensores compactos
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                SensorDot(Icons.Default.GpsFixed, stats.isGpsConnected, stats.isGpsScanning, TabataColors.WorkGreen)
-                SensorDot(Icons.Default.Favorite, stats.isHrConnected, stats.isHrScanning, Color(0xFFE91E63))
-                SensorDot(Icons.AutoMirrored.Filled.DirectionsBike, stats.isCadenceConnected, stats.isCadenceScanning, TabataColors.RoundsBlue)
-            }
+            // Sensores compactos: GPS y un punto por hueco (HR1, HR2, C1, C2)
+            CompactSensorRow(stats, slots)
 
             // Timer (MÁS GRANDE en horizontal)
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -986,14 +1155,8 @@ private fun LandscapeMetricsPage(
             }
             Spacer(modifier = Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                LapMetricCardNoIcon(
-                    value = if (stats.heartRate > 0) "${stats.heartRate}" else "--",
-                    unit = "bpm",
-                    label = "HR",
-                    valueColor = if (stats.isHrConnected) Color(0xFFE91E63) else Color.Gray,
-                    modifier = Modifier.weight(1f)
-                )
-                CadencePaceCard(stats, Modifier.weight(1f))
+                HeartRateSplitCard(stats, slots, Modifier.weight(1f))
+                CadencePaceCard(stats, slots, Modifier.weight(1f))
             }
             if (stats.steps > 0) {
                 Spacer(modifier = Modifier.height(12.dp))
@@ -1015,6 +1178,7 @@ private fun LandscapeLapsPage(
     onLap: () -> Unit
 ) {
     val lastManual = remember(laps) { CurrentLapModel.lastManual(laps) }
+    val slots = rememberSensorSlots()
 
     Row(
         modifier = Modifier
@@ -1032,12 +1196,8 @@ private fun LandscapeLapsPage(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Sensores compactos
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                SensorDot(Icons.Default.GpsFixed, stats.isGpsConnected, stats.isGpsScanning, TabataColors.WorkGreen)
-                SensorDot(Icons.Default.Favorite, stats.isHrConnected, stats.isHrScanning, Color(0xFFE91E63))
-                SensorDot(Icons.AutoMirrored.Filled.DirectionsBike, stats.isCadenceConnected, stats.isCadenceScanning, TabataColors.RoundsBlue)
-            }
+            // Sensores compactos: GPS y un punto por hueco (HR1, HR2, C1, C2)
+            CompactSensorRow(stats, slots)
 
             // Estado "EN RUTA"
             StatusLabel(stats = stats, fontSize = 14)
@@ -1130,25 +1290,26 @@ private fun StatusLabel(stats: FreeRideStats, fontSize: Int = 16) {
 
 @Composable
 private fun FreeRideSensorBar(stats: FreeRideStats, onReconnect: () -> Unit) {
-    val batteries = rememberSensorBatteries()
+    // GPS y los 4 huecos (HR1, HR2, C1, C2), cada uno con su señal ANT+/BLE y su batería (spec 007, T-05)
+    val slots = rememberSensorSlots()
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-            .padding(12.dp),
+            .padding(horizontal = 8.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {
         SensorChipAnimated(Icons.Default.GpsFixed, "GPS", stats.isGpsConnected, stats.isGpsScanning, TabataColors.WorkGreen)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            SensorChipAnimated(Icons.Default.Favorite, "HR", stats.isHrConnected, stats.isHrScanning, Color(0xFFE91E63))
-            BatteryBadge(batteries[0])
-            BatteryBadge(batteries[1])
-        }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            SensorChipAnimated(Icons.AutoMirrored.Filled.DirectionsBike, "CAD", stats.isCadenceConnected, stats.isCadenceScanning, TabataColors.RoundsBlue)
-            BatteryBadge(batteries[2])
-            BatteryBadge(batteries[3])
+        SENSOR_SLOT_LABELS.forEachIndexed { i, label ->
+            val status = slots.getOrNull(i)
+            SensorSlotBadge(
+                label = label,
+                status = status,
+                labelColor = slotSignalColor(status),
+                fontSize = 11.sp,
+                stacked = true
+            )
         }
         IconButton(onClick = onReconnect, modifier = Modifier.size(32.dp)) {
             Icon(Icons.Default.Refresh, "Reconectar", tint = Color.White.copy(alpha = 0.7f))

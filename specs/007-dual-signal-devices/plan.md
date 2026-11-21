@@ -111,6 +111,32 @@
     `ConfigViewModel` añade `slots`; conserva sus observadores y `BleScanStatus` (Home lo usa hasta T-06).
   - `WorkoutService` no se toca en T-04.
 - Ruta: `FreeRideStats` con HR1/HR2 y C1/C2 separados; medias HR1/HR2 separadas; escucha C2.
+- Detalle (T-05):
+  - **`FreeRideStats`** (solo se añade, con valores por defecto): `heartRate2`, `avgHeartRate2`,
+    `maxHeartRate2`, `isHr2Connected`, `cadence2`, `avgCadence2`, `isCadence2Connected`, `cadence2Active`.
+    `heartRate`/`avgHeartRate`/`maxHeartRate`/`cadence`/`avgCadence`/`cadenceActive` pasan a ser **solo** HR1/C1:
+    se quita el relevo "si no hay HR1, HR2 ocupa `heartRate`" y HR2 ya no marca `isHrConnected`.
+  - **`FreeRideService`:** nuevo colector de `observeCadence2()` (su propio `Job`, cancelado en
+    `stopSensorCollectors()` como los demás); es lo que arranca el hueco C2 (observar `SlotStatus` no arranca
+    sensores). El vigilante de cadencia calcula también `cadence2Active`. Cada `Value` marca conectado su hueco.
+    Logs `❤️`/`❤️2`/`🚴`/`🚴2`. Ciclo de vida del servicio sin cambios: solo se añade un colector junto a los otros.
+  - **Lecturas por hueco** en un ayudante puro `util/laps/DualSlotSamples` (`add/avg/max/primarySlot/clear`,
+    sincronizado: los colectores escriben desde hilos distintos) para la ruta, la vuelta manual y la vuelta AUTO,
+    de pulso y de cadencia. Antes las vueltas mezclaban las lecturas de las dos bandas en una sola media.
+  - **Vueltas y Room (sin cambios de esquema):** una vuelta guarda un solo pulso y una sola cadencia: HR1/C1 si
+    el tramo tiene lecturas de HR1/C1; si no, HR2/C2. La sesión ya guardaba HR1 y HR2 por separado con ese mismo
+    criterio (`avgHeartRate*`, `avgHeartRate2*`); la cadencia de la sesión pasa al mismo criterio (C1, si no C2).
+    `sensor_readings.cadence` sigue siendo solo C1; C2 solo en vivo (R7).
+  - **Pantalla Ruta** (como Tabata en T-04: el número sale del servicio; señal, batería y punto de `SlotStatus`):
+    - Tarjeta de pulso partida siempre en **HR1 | HR2**, cada mitad con `SensorSlotBadge` (hueco + ANT+/BLE +
+      batería); sin dato, "--".
+    - Tarjeta "Cadencia / Ritmo": si C1 o C2 emiten, partida en **C1 | C2** con su insignia; si ninguno
+      emite, ritmo (min/km) como hasta ahora.
+    - Vuelta en curso (página 3): "HR1" y "HR2" en casillas propias; "Cadencia" = C1, si no C2 (`CurrentLapModel`
+      sin cambios).
+    - Barra de sensores (vertical): GPS + HR1, HR2, C1, C2 con `SensorSlotBadge` en lugar de "HR"/"CAD" con
+      baterías sueltas. Horizontal: puntos HR1/HR2/C1/C2 por hueco (verde señal / naranja buscando / rojo perdido).
+      La barra común `SensorBar` y la hoja "Dispositivos" son de T-06.
 
 ## Archivos
 - Nuevos: `sensor/SensorDeviceRegistry.kt`, `sensor/PairingPolicy.kt`, `sensor/DualSlotAllocator.kt`,

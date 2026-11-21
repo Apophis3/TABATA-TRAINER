@@ -35,7 +35,13 @@ usuario confirme la anterior con evidencia. El agente **no** ejecuta Gradle ni `
   Visto en la prueba: la Decathlon (HR2) da una línea más irregular que la XOSS (HR1) aunque se cambien de
   sitio → es la banda (cada una calcula su valor), no la app. Fuera de T-04: el lápiz de Config tapa en parte
   el interruptor del GPS; al quitar una banda ANT+ sigue dando el último valor ~10–20 s.
-- [ ] T-05 **Ruta Libre separada.** HR1/HR2 y C1/C2 con señal; medias HR1/HR2 separadas; escucha C2.
+- [x] T-05 *(validada 2026-11-21 con la 1.6.120: suite 194/194 verde; ruta con dos bandas por ANT+; BD con HR1 y HR2 separados; capturas en vertical y horizontal)*
+  **Ruta Libre separada.** HR1/HR2 y C1/C2 con señal; medias HR1/HR2 separadas; escucha C2.
+  Hecho: `util/laps/DualSlotSamples` (lecturas por hueco); `FreeRideStats` con campos HR2/C2; colector C2 y
+  vigilante de cadencia por hueco; vueltas y Room con el hueco principal (HR1/C1, si no HR2/C2). Pantalla:
+  tarjeta HR1 | HR2, C1 | C2 si hay cadencia (si no, ritmo), vuelta en curso con HR1 y HR2, barra con GPS y los
+  4 huecos. Sin probar: cierre de vueltas (pasa a T-07), C2 y cadencia real (T-07). Visto: en horizontal la
+  franja de pasos queda bajo el indicador de páginas (la columna se desplaza).
 - [ ] T-06 **Hoja "Dispositivos" común + Home.** Estado real por hueco en Home; hoja con
   unir/separar/renombrar/hueco/olvidar/reconectar/guiado; barra de sensores común `SensorBar` que abre la hoja
   al tocarla en Home, Tabata, Ruta (también en marcha) y Config (R8.1–R8.3); la flecha sigue reconectando.
