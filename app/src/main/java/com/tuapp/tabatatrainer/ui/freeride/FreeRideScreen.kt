@@ -6,6 +6,8 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.content.res.Configuration
 import android.os.IBinder
+import android.os.SystemClock
+import android.util.Log
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -18,6 +20,8 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.*
@@ -34,6 +38,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.TextUnit
@@ -57,6 +63,7 @@ import com.tuapp.tabatatrainer.util.laps.CadenceDisplayPolicy
 import com.tuapp.tabatatrainer.util.laps.CurrentLapModel
 import com.tuapp.tabatatrainer.util.laps.KmAlert
 import com.tuapp.tabatatrainer.util.laps.LastManualLap
+import com.tuapp.tabatatrainer.util.map.MapFollowPolicy
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -297,29 +304,49 @@ private fun MetricsPage(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                LapMetricCardNoIcon(
-                    value = if (stats.currentSpeedKmh > 0.5f) String.format("%.1f", stats.currentSpeedKmh) else "--",
-                    unit = "km/h",
-                    label = "Velocidad",
-                    modifier = Modifier.weight(1f)
-                )
-                LapMetricCardNoIcon(
-                    value = String.format("%.2f", stats.totalDistanceMeters / 1000f),
-                    unit = "km",
-                    label = "Distancia",
-                    modifier = Modifier.weight(1f)
-                )
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                LapMetricCardNoIcon(
-                    value = if (stats.heartRate > 0) "${stats.heartRate}" else "--",
-                    unit = "bpm",
-                    label = "HR",
-                    valueColor = if (stats.isHrConnected) Color(0xFFE91E63) else Color.Gray,
-                    modifier = Modifier.weight(1f)
-                )
-                CadencePaceCard(stats, Modifier.weight(1f))
+            // Las tarjetas ocupan el alto que deja libre la franja de pasos (que se mide antes,
+            // al no llevar weight) y ajustan el tamaño del número a ese alto: así la franja
+            // ya no queda recortada y sus etiquetas se leen enteras.
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                val density = LocalDensity.current
+                val cardPadding = 16.dp
+                val rowHeight = (maxHeight - 12.dp) / 2
+                // Alto de tarjeta = 2·padding + número + 4 dp + etiqueta (interlineado M3 ~24 dp)
+                val valueLine = rowHeight - cardPadding * 2 - 4.dp - 24.dp
+                val valueFontSize = with(density) { (valueLine / 1.3f).toSp() }
+                    .value.coerceIn(28f, 55f).sp
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        LapMetricCardNoIcon(
+                            value = if (stats.currentSpeedKmh > 0.5f) String.format("%.1f", stats.currentSpeedKmh) else "--",
+                            unit = "km/h",
+                            label = "Velocidad",
+                            valueFontSize = valueFontSize,
+                            contentPadding = cardPadding,
+                            modifier = Modifier.weight(1f)
+                        )
+                        LapMetricCardNoIcon(
+                            value = String.format("%.2f", stats.totalDistanceMeters / 1000f),
+                            unit = "km",
+                            label = "Distancia",
+                            valueFontSize = valueFontSize,
+                            contentPadding = cardPadding,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        LapMetricCardNoIcon(
+                            value = if (stats.heartRate > 0) "${stats.heartRate}" else "--",
+                            unit = "bpm",
+                            label = "HR",
+                            valueColor = if (stats.isHrConnected) Color(0xFFE91E63) else Color.Gray,
+                            valueFontSize = valueFontSize,
+                            contentPadding = cardPadding,
+                            modifier = Modifier.weight(1f)
+                        )
+                        CadencePaceCard(stats, Modifier.weight(1f), valueFontSize, cardPadding)
+                    }
+                }
             }
             // Podómetro del móvil: solo si hay pasos (franja compacta para que quepa)
             if (stats.steps > 0) StepsStrip(stats)
@@ -416,29 +443,56 @@ private fun RealTimeGoogleMap(
         if (currentLatitude != 0.0) LatLng(currentLatitude, currentLongitude) else null
     }
 
-    // ⚡ Preservar zoom y posición al cambiar de orientación
-    var savedZoom by rememberSaveable { mutableStateOf(16f) }
-    var savedPosition by rememberSaveable { mutableStateOf<LatLng?>(null) }
-    
+    // rememberCameraPositionState ya conserva zoom y posición al rotar (rememberSaveable)
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(
-            savedPosition ?: currentLocation ?: LatLng(43.3, -2.98),
-            savedZoom
+            currentLocation ?: LatLng(43.3, -2.98),
+            MapFollowPolicy.FOLLOW_ZOOM
         )
     }
 
-    // ⚡ Seguir ubicación actual si está en tracking
-    LaunchedEffect(currentLocation, isTracking) {
-        if (isTracking && currentLocation != null) {
-            savedPosition = currentLocation
-            cameraPositionState.animate(CameraUpdateFactory.newLatLng(currentLocation), durationMs = 500)
+    // R9: último toque del usuario en el mapa (pellizco, arrastre o botones +/-) y el zoom en que lo dejó
+    var lastUserInteractionMs by rememberSaveable { mutableStateOf<Long?>(null) }
+    var userZoom by rememberSaveable { mutableStateOf<Float?>(null) }
+    val reason = cameraPositionState.cameraMoveStartedReason
+    val isUserMove = reason == CameraMoveStartedReason.GESTURE || reason == CameraMoveStartedReason.API_ANIMATION
+
+    // TEMPORAL (T-11): zoom con el que (re)aparece el mapa → distingue "recreado alejado" de "alejado por gesto"
+    LaunchedEffect(Unit) {
+        Log.d("MapDiag", "mapa compuesto zoom=${cameraPositionState.position.zoom} userZoom=$userZoom tracking=$isTracking")
+    }
+
+    // Se marca al empezar y al terminar el gesto: los 10 s de margen cuentan desde que suelta
+    LaunchedEffect(cameraPositionState.isMoving) {
+        if (!isUserMove) return@LaunchedEffect
+        lastUserInteractionMs = SystemClock.elapsedRealtime()
+        if (!cameraPositionState.isMoving) {
+            userZoom = cameraPositionState.position.zoom
+            // TEMPORAL (T-11): solo movimientos del usuario, no los del seguimiento (1 por segundo)
+            Log.d("MapDiag", "usuario deja zoom=$userZoom reason=$reason tracking=$isTracking")
         }
     }
-    
-    // ⚡ Guardar zoom cuando cambia (solo si no está en tracking para no interferir)
-    LaunchedEffect(cameraPositionState.position.zoom) {
-        if (!isTracking) {
-            savedZoom = cameraPositionState.position.zoom
+
+    // R9: seguir la posición sin cortar gestos; movimiento instantáneo (sin animación que se pise)
+    LaunchedEffect(currentLocation, isTracking) {
+        val loc = currentLocation ?: return@LaunchedEffect
+        val action = MapFollowPolicy.decide(
+            isTracking = isTracking,
+            hasLocation = true,
+            isUserGestureActive = cameraPositionState.isMoving && isUserMove,
+            lastUserInteractionMs = lastUserInteractionMs,
+            nowMs = SystemClock.elapsedRealtime(),
+            currentZoom = cameraPositionState.position.zoom,
+            userZoom = userZoom
+        )
+        when (action) {
+            MapFollowPolicy.Action.NONE -> Unit
+            MapFollowPolicy.Action.CENTER -> cameraPositionState.move(CameraUpdateFactory.newLatLng(loc))
+            MapFollowPolicy.Action.CENTER_AND_ZOOM -> {
+                val target = MapFollowPolicy.targetZoom(userZoom)
+                Log.d("MapDiag", "zoom restaurado ${cameraPositionState.position.zoom} -> $target")
+                cameraPositionState.move(CameraUpdateFactory.newLatLngZoom(loc, target))
+            }
         }
     }
 
@@ -454,7 +508,9 @@ private fun RealTimeGoogleMap(
         modifier = Modifier.fillMaxSize(),
         cameraPositionState = cameraPositionState,
         properties = mapProperties,
-        uiSettings = mapUiSettings
+        uiSettings = mapUiSettings,
+        // RF-9.4: +/- y logo por encima de la franja de métricas (~100 dp) y del FAB de pausa (56 dp)
+        contentPadding = PaddingValues(bottom = 172.dp)
     ) {
         if (routeCoordinates.size >= 2) {
             Polyline(points = routeCoordinates, color = TabataColors.RoundsBlue, width = 10f)
@@ -752,9 +808,9 @@ private fun StepsStripItem(value: String, unit: String, label: String, modifier:
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Row(verticalAlignment = Alignment.Bottom) {
             Text(value, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
-            if (unit.isNotEmpty()) Text(" $unit", fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f))
+            if (unit.isNotEmpty()) Text(" $unit", fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f), maxLines = 1)
         }
-        Text(label, fontSize = 11.sp, color = Color.White.copy(alpha = 0.5f))
+        Text(label, fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f), maxLines = 1)
     }
 }
 
@@ -763,12 +819,19 @@ private fun StepsStripItem(value: String, unit: String, label: String, modifier:
  * o deja de emitir, ritmo en min/km. La conmutación sale de [FreeRideStats.cadenceActive].
  */
 @Composable
-private fun CadencePaceCard(stats: FreeRideStats, modifier: Modifier = Modifier) {
+private fun CadencePaceCard(
+    stats: FreeRideStats,
+    modifier: Modifier = Modifier,
+    valueFontSize: TextUnit = 55.sp,
+    contentPadding: androidx.compose.ui.unit.Dp = 16.dp
+) {
     val slot = CadenceDisplayPolicy.slot(stats.cadenceActive, stats.cadence, stats.paceSecPerKm)
     LapMetricCardNoIcon(
         value = slot.value,
         unit = slot.unit,
         label = slot.label,
+        valueFontSize = valueFontSize,
+        contentPadding = contentPadding,
         modifier = modifier
     )
 }
@@ -796,18 +859,32 @@ private fun LapMetricCardNoIcon(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // ⚡ SIN ICONO - Eliminado completamente para hacer datos más grandes
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(
-                    value,
-                    fontSize = valueFontSize,  // ⚡ Tamaño configurable
-                    fontWeight = FontWeight.Bold,
-                    color = valueColor
+            // Valor en una sola línea que encoge hasta caber; la unidad se mide primero
+            // y nunca se parte (antes "10:15 /km" se solapaba y la unidad salía en vertical).
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.Bottom
+            ) {
+                BasicText(
+                    text = value,
+                    style = TextStyle(fontWeight = FontWeight.Bold, color = valueColor),
+                    maxLines = 1,
+                    softWrap = false,
+                    autoSize = TextAutoSize.StepBased(
+                        minFontSize = 16.sp,
+                        maxFontSize = valueFontSize,
+                        stepSize = 1.sp
+                    ),
+                    modifier = Modifier.weight(1f, fill = false)
                 )
                 if (unit.isNotEmpty()) {
                     Text(
                         " $unit",
                         fontSize = 16.sp,  // ⚡ Unidad también más grande
                         color = Color.White.copy(alpha = 0.6f),
+                        maxLines = 1,
+                        softWrap = false,
                         modifier = Modifier.padding(bottom = 4.dp)
                     )
                 }

@@ -6,6 +6,53 @@ memoria privada de Claude. **Lo más reciente arriba.**
 
 ---
 
+## 2026-11-21 — Ruta Libre: valor de Ritmo solapado en la ventana Métricas
+
+### Contexto
+Captura en exterior caminando: la celda «Ritmo» mostraba `10:15` partido en dos líneas encima de sí
+mismo y la unidad `/km` en vertical letra a letra (el valor a 55 sp no cabía en media pantalla).
+
+### Hecho
+- `FreeRideScreen.LapMetricCardNoIcon`: el valor pasa a `BasicText` de una línea con
+  `TextAutoSize.StepBased` (de 55 sp baja hasta 16 sp si no cabe); la unidad se mide primero y no se
+  parte. Afecta a todas las celdas que usan esa tarjeta (Métricas y tablas de vuelta), solo si no caben.
+- Lógica sin cambios (`CadenceDisplayPolicy`): con sensor de cadencia emitiendo → «Cadencia» en rpm;
+  sin sensor o >5 s sin datos → «Ritmo» en min/km del GPS (caminar o correr). Validado por el usuario.
+- Franja de pasos (Pasos · Pasos/min · Zancada) recortada en portrait: se veían los números pero no las
+  etiquetas. `MetricsPage`: las 4 tarjetas van en un `BoxWithConstraints` con weight, la franja se mide
+  antes y el tamaño del número de las tarjetas se calcula con el alto sobrante (28–55 sp). Etiquetas
+  de la franja a 12 sp y más contraste. Landscape sin cambio de layout (ya tenía scroll).
+
+### Estado
+- Validado por el usuario en el S22+ (portrait): celda Ritmo y franja de pasos se leen enteras.
+
+---
+
+## 2026-11-21 — Spec 006 · T-11 (R9): mapa en vivo sin zoom
+
+### Contexto
+Prueba en exterior: en la ventana Mapa, durante la actividad, el mapa queda a escala mundial y no deja
+hacer zoom; en el resumen final el track se ve bien. El usuario pide ir fallo a fallo y con tests.
+
+### Hecho
+- Causa en código: `RealTimeGoogleMap` lanzaba `animate(newLatLng)` en cada fix (~1 s), que corta el
+  pellizco en curso y conserva cualquier zoom alejado; +/- y logo tapados por la franja de métricas.
+- Nuevo `util/map/MapFollowPolicy.kt` (+ `MapFollowPolicyTest`): no sigue mientras el usuario toca ni
+  10 s después; luego centra con su zoom; si la cámara está en un zoom que el usuario no eligió
+  (p. ej. mundial) restaura el suyo o 16 si nunca tocó.
+- `FreeRideScreen`: `move` instantáneo según la política, detección de gesto/+/- por
+  `cameraMoveStartedReason`, `contentPadding` inferior de 172 dp. Fuera `savedZoom`/`savedPosition`.
+- Log temporal `MapDiag` (zoom al aparecer el mapa, zoom que deja el usuario, restauraciones) para
+  confirmar la causa del zoom mundial en Logcat; retirar al validar.
+- Spec R9 (RF-9.1…9.4) y tarea T-11 añadidas. Pager, `NavGraph` y `FreeRideService` sin tocar.
+
+### Pendiente
+- Usuario: compilar, `./gradlew test`, instalar y probar zoom durante una ruta; aportar Logcat `MapDiag`.
+- Detectado y no tocado (fallo aparte): la etiqueta «Mapa» del indicador de páginas se solapa con el
+  tiempo de la franja de métricas.
+
+---
+
 ## 2026-10-10 — Spec 006: Ruta Libre (cadencia/ritmo, vueltas AUTO/MANUAL, tabla de vueltas)
 
 ### Contexto
@@ -36,6 +83,8 @@ Brief del usuario R1–R8 para la pantalla de actividad exterior con GPS. Sesió
   sin cambios de ciclo de vida). Nuevo `util/laps/CurrentLapModel.kt` (+ `CurrentLapModelTest`).
 - `LapHistoryList` queda sin uso en pantalla (se conserva el fichero; candidata a limpieza si el usuario lo aprueba).
 - Pendiente: usuario compila, pasa la suite y prueba la ventana 3 (portrait y landscape) con una ruta con 1–2 vueltas.
+- Checklist estructurado de pruebas en exterior (GPS + ANT+) para validar T-04…T-08 y T-10:
+  `specs/006-outdoor-laps/checklist-pruebas-exterior.md`. El usuario va marcando y responde por fase.
 
 ### T-09 (validada por el usuario: compiló y probó, todo bien)
 - Pager de 3 → 4 ventanas en `FreeRideScreen` (portrait y landscape): 1 Métricas · 2 Mapa · 3 Vueltas · 4 Tabla.

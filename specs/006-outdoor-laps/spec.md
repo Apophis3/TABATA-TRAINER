@@ -80,6 +80,15 @@ Mejorar la pantalla de actividad en exterior con GPS (**Ruta Libre**, `FreeRideS
 - RF-8.6: el scroll horizontal de la tabla no impide cambiar de ventana: en los bordes de la tabla el gesto pasa al pager.
 - RF-8.7 *(decisión del usuario tras probar T-09)*: la **ventana 3 ya no lleva «Historial de Vueltas»** (está en la tabla de la ventana 4). Pasa a ser el **panel de la vuelta manual en curso**: nº de vuelta, tiempo, distancia, ritmo medio de la vuelta, velocidad, FC, pasos, cadencia (ppm; rpm del sensor si hay sensor de bici activo, nunca mezclados) y desnivel+, todos de la ventana de ESA vuelta, más una franja con la **última vuelta manual** cerrada (tiempo, ritmo, FC, pasos). Sin dato → `--`, nunca 0.
 
+### R9 — Mapa en vivo: zoom y seguimiento (fallo detectado por el usuario en exterior, 2026-11-21)
+Síntoma: en la ventana 2 (Mapa), durante la actividad, el mapa se queda a escala mundial y no deja hacer zoom; al terminar (resumen) el track sí se ve bien.
+Causa (código): con la actividad en marcha, cada fix GPS (~1 s) lanza un `animate` de cámara que corta cualquier pellizco en curso; el seguimiento conserva el zoom que tenga la cámara (si queda alejada, se queda así); los botones +/- y el logo quedan tapados por la franja de métricas inferior.
+- RF-9.1: el zoom/desplazamiento del usuario (pellizco, arrastre, botones +/-) **no se interrumpe**: mientras toca el mapa y durante **10 s** después, la cámara no sigue la posición.
+- RF-9.2: pasados esos 10 s sin tocar, vuelve a seguir la posición **conservando el zoom elegido** por el usuario.
+- RF-9.3: si al seguir la cámara está en un zoom que el usuario no eligió (p. ej. escala mundial), se restaura **el último zoom que dejó el usuario** o, si nunca tocó el mapa, **zoom 16** (vista de calle).
+- RF-9.4: los botones +/- y el logo de Google quedan por encima de la franja de métricas y de los botones flotantes (relleno inferior del mapa).
+- Sin cambios en el pager (Q4), en `NavGraph` ni en `FreeRideService`.
+
 ## Persistencia (soporte de R4/R7/R8)
 - RF-P1: las vueltas se guardan en `lap_records` al terminar la sesión (ambas series, íntegras). Esquema nuevo en `plan.md` (migración 9 → 10, autorizada por esta spec).
 - RF-P2: borrar una sesión borra sus vueltas. El Excel usa las vueltas persistidas y su `type` (se elimina la heurística de 900–1100 m).
