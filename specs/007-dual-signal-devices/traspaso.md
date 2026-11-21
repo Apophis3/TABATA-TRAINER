@@ -2,9 +2,12 @@
 
 Documento para continuar en un hilo nuevo. Pegar en el hilo nuevo:
 
-> Spec 007, rama `spec-007-dual-signal-devices`. T-05 validada. Toca T-06: hoja "Dispositivos" común + Home
-> (ver `tasks.md` y `plan.md`, R8.1–R8.3). Reglas en `AGENTS.md`. Anota el detalle en `plan.md` antes del
-> código. Valida con mis pruebas (lee tú los tests y el Logcat del móvil). No compiles ni instales (lo hago yo).
+> Lee AGENTS.md, docs/constitution.md, specs/007-dual-signal-devices/{spec.md, plan.md, tasks.md, traspaso.md}
+> y la primera entrada de 00_estado_proyecto_y_memoria.md. Seguimos con la spec 007 en la rama
+> `spec-007-dual-signal-devices` (T-01…T-05 validadas). Empieza T-06: hoja "Dispositivos" común + Home, con la
+> barra de sensores común `SensorBar` que abre la hoja en Home, Tabata, Ruta y Config (R8, R8.1–R8.3). Punto de
+> partida en `traspaso.md`, sección "T-06". Anota el detalle en `plan.md` antes del código. Valida con mis
+> pruebas (lee tú los resultados de tests y el Logcat del móvil). No compiles ni instales (lo hago yo).
 
 ## Objetivo de la spec
 - Un aparato físico (pulsómetro o cadenciómetro, emite por ANT+ y BLE) = un hueco fijo (HR1/HR2, C1/C2).
@@ -32,22 +35,29 @@ Documento para continuar en un hilo nuevo. Pegar en el hilo nuevo:
   Siguiente: T-06 (hoja "Dispositivos" + Home + `SensorBar` común; la barra de Ruta de T-05 pasa a `SensorBar`).
   T-07 sin empezar. Una tarea cada vez.
 
-## T-05 — punto de partida (Ruta Libre separada, R7)
-- Qué pide (`tasks.md`, `plan.md` "Ruta"): HR1/HR2 y C1/C2 por separado con su señal y batería, como Tabata;
-  medias de HR1 y HR2 separadas; escuchar C2. Anotar el detalle en `plan.md` antes del código.
+## T-06 — punto de partida (hoja "Dispositivos" común + Home, R8)
+- Qué pide (`tasks.md`; `spec.md` R8, R8.1–R8.3; `plan.md` §5 y §6): hoja "Dispositivos" con señales visibles y
+  aparatos guardados; unir, separar, renombrar, asignar hueco, olvidar, reconectar; modo guiado. Barra común
+  `SensorBar` que abre la hoja al tocarla en Home, Tabata, Ruta (también en marcha) y Config; la flecha sigue
+  reconectando; abrir la hoja no para la sesión. Home con estado real por hueco. Anotar el detalle en `plan.md`
+  antes del código.
 - Lo que ya existe:
-  - `service/FreeRideService.kt` (~1176 l.): `FreeRideStats` (l. 44) tiene un solo `heartRate`, `avgHeartRate`,
-    `maxHeartRate`, `cadence`, `avgCadence`. Escucha `observeHeartRate()` (l. 321) y `observeHeartRate2()`
-    (l. 391): los dos escriben en `heartRate` y mezclan medias con `hrReadings + hr2Readings` (l. 357 y 418).
-    Solo escucha `observeCadence()` (l. 457), no C2.
-  - Al guardar (≈ l. 1039–1069) ya separa `avgHeartRate2/maxHeartRate2/minHeartRate2` y `heartRate2` por
-    segundo; `sensor_readings` no tiene `cadence2` → no se guarda C2 (Room fuera de alcance: solo en pantalla).
-  - `ui/freeride/FreeRideScreen.kt` (~1391 l.): "HR" único (l. 339, 713, 990); baterías con `BatteryBadge`
-    (≈ l. 1145–1151). Reutilizar `SensorSlotBadge` / `rememberSensorSlots()` de T-04.
-  - `FreeRideService` es servicio en primer plano: ampliar `FreeRideStats` sin tocar su ciclo de vida (Clave 3).
-- No tocar en T-05: Home y la hoja "Dispositivos" / `SensorBar` (es T-06), Room.
-- Pendiente visto en T-04 (fuera de alcance, solo si el usuario lo pide): en Config el lápiz flotante tapa en
-  parte el interruptor del GPS; al quitar una banda ANT+ sigue dando el último valor ~10–20 s.
+  - Registro: `sensor/SensorDeviceRegistry.kt` ya tiene `devices` (StateFlow), `link`, `split`, `forget`,
+    `setSlot`, `rename`, `remember` (cada cambio se guarda y se registra en Logcat con 💓/🚴 "Registro:").
+  - Señales visibles: `HeartRateHub.devices` (StateFlow, l. 82) y su equivalente en `CadenceHub`; `restart()`
+    para reconectar.
+  - Hueco + señal + batería: `ui/components/SensorSlotBadge.kt` (`SensorSlotBadge`, `rememberSensorSlots()`,
+    `SlotStatus.signalState`).
+  - Barras actuales a sustituir por `SensorBar`: Home `SensorBar` privada (`ui/home/HomeScreen.kt` l. 275, usa
+    `BleScanStatus` + `rememberSensorBatteries`); Tabata chips (`ui/workout/WorkoutScreen.kt` ≈ l. 852–869);
+    Ruta `FreeRideSensorBar` (`ui/freeride/FreeRideScreen.kt` l. 1292, ya con los 4 huecos de T-05); Config
+    (`ui/config/ConfigScreen.kt`, rejilla con `SensorSlotBadge` ≈ l. 633).
+  - Nuevo: `ui/devices/DevicesSheet.kt` + `DevicesViewModel` (Hilt), `ModalBottomSheet` dentro de cada
+    pantalla; `NavGraph.kt` no se toca.
+- No tocar: Room, Gradle, `NavGraph.kt`, ciclo de vida de `WorkoutService` / `FreeRideService`.
+- Pendiente visto (fuera de alcance, solo si el usuario lo pide): en Config el lápiz flotante tapa en parte el
+  interruptor del GPS; al quitar una banda ANT+ sigue dando el último valor ~10–20 s; en Ruta horizontal la
+  franja de pasos queda bajo el indicador de páginas.
 
 ## Observaciones de la última prueba (1.6.111 → 1.6.113)
 - Al arrancar, el receptor ANT+ a veces responde ADAPTER_NOT_DETECTED 1–2 min (del móvil/servicio ANT+; ya
