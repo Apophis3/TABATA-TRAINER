@@ -8,7 +8,9 @@ usuario confirme la anterior con evidencia. El agente **no** ejecuta Gradle ni `
   bloqueadas, formato v2 con migración del de la spec 003). `PairingPolicy` (persistente solo si es seguro;
   sesión por mutuo-mejor sin empate, también en reposo con umbral 4). `HeartRateHub.detectTwins` pasa a usar
   `PairingPolicy`. Tests: `DeviceBookTest`, `PairingPolicyTest` (sustituye a `HrDeviceBookTest`).
-- [~] T-02 *(código escrito; pendiente de que el usuario compile, pase la suite y pruebe dos bandas)* **Huecos.** `DualSlotAllocator` extraído de `HeartRateHub.tick()`; hueco fijo por aparato; sin
+- [~] T-02 *(prueba real OK del usuario 2026-11-21: ANT+↔BLE, dos bandas, poner/quitar. Fallo visto: en Home
+  HR2 seguía "activo" (punto y batería) tras quitar la banda → corregido, el hueco sin señal ya no da batería.
+  Pendiente: compilar, pasar la suite y comprobar que HR2 se apaga en Home)* **Huecos.** `DualSlotAllocator` extraído de `HeartRateHub.tick()`; hueco fijo por aparato; sin
   reinicio de huecos al cambiar de pantalla; `SlotStatus` por hueco. **Regla ANT+ desplaza a BLE:** dos grupos
   ANT+ distintos son siempre dos aparatos → ocupan los dos huecos y un grupo solo-BLE cede el suyo (hoy, con
   dos bandas indistinguibles, los BLE llegan antes, la ANT+ espera 30 s en cuarentena y encuentra los huecos

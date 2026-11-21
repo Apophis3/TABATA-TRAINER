@@ -209,8 +209,9 @@ class DualSlotAllocator(
             protocol = best?.protocol,
             connected = best != null,
             value = best?.value ?: 0,
-            // ANT+ HR no da batería (SDK 3.9): se usa la de la otra señal del mismo aparato (spec 005, T-03)
-            battery = best?.battery ?: members.firstNotNullOfOrNull { it.battery }
+            // ANT+ HR no da batería (SDK 3.9): se usa la de la otra señal del mismo aparato (spec 005, T-03),
+            // solo si esa señal sigue conectada. Sin fuente no hay batería (Home la usa como "conectado").
+            battery = best?.let { b -> b.battery ?: members.firstNotNullOfOrNull { m -> m.battery.takeIf { m.connected } } }
         )
     }
 

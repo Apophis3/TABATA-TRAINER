@@ -37,6 +37,11 @@ con T-02. Pregunta abierta: abrir la hoja también tocando HR1/HR2/C1/C2 en Taba
 - Decisión del usuario (R8.1–R8.3 en la spec): la hoja "Dispositivos" se abre tocando la barra de sensores en
   todas las pantallas (Home, Tabata, Ruta también en marcha, Config) con una barra común `SensorBar`; la
   flecha de refrescar sigue reconectando. Va en T-06.
+- Prueba real de T-02 (usuario): ANT+↔BLE, dos bandas, poner y quitar → todo bien. Fallo: tras quitar una
+  banda, Home seguía mostrando HR2 activo con batería. Causa: Home deduce HR2/C2 "conectado" de la batería
+  y el asignador mantenía la batería de las señales del aparato aunque estuvieran desconectadas. Arreglo en
+  `DualSlotAllocator.pickSource`: sin fuente → batería null; la batería prestada solo de señales conectadas.
+  Test `aparato quitado deja el hueco sin bateria`. El estado real por hueco en Home sigue siendo T-06.
 
 ---
 

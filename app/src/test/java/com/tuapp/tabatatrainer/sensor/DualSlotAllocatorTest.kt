@@ -141,6 +141,21 @@ class DualSlotAllocatorTest {
         assertEquals(listOf("ANT:B", "ANT:A"), st.map { it.deviceKey })
     }
 
+    // --- Batería -------------------------------------------------------------------------------------
+
+    @Test
+    fun `aparato quitado deja el hueco sin bateria`() {
+        val bat = SensorBattery.parseBleBatteryLevel(byteArrayOf(80))
+        val bleWithBat = ble("1").copy(battery = bat)
+        book.link(HR, "ANT:1", "BLE:1", "Banda", manual = false)
+        var st = step(ant("1"), bleWithBat)
+        assertEquals("ANT:1", st[0].sourceId)
+        assertEquals("la ANT+ usa la batería del BLE", bat, st[0].battery)
+        st = step(ant("1", connected = false), bleWithBat.copy(connected = false, fresh = false))
+        assertNull(st[0].sourceId)
+        assertNull("sin señal no se muestra batería", st[0].battery)
+    }
+
     @Test
     fun `clear olvida el reparto`() {
         step(ant("B", v = 140)); step(ant("B", v = 140), ant("A"))
