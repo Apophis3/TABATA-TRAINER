@@ -6,12 +6,17 @@ import com.tuapp.tabatatrainer.sensor.CadenceReading
 import com.tuapp.tabatatrainer.sensor.GpsManager
 import com.tuapp.tabatatrainer.sensor.HeartRateReading
 import com.tuapp.tabatatrainer.sensor.SensorManager
+import com.tuapp.tabatatrainer.sensor.SlotStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import timber.log.Timber
@@ -43,6 +48,16 @@ class ConfigViewModel @Inject constructor(
 
     private val _bleStatus = MutableStateFlow(BleScanStatus())
     val bleStatus = _bleStatus.asStateFlow()
+
+    /**
+     * HR1, HR2, C1, C2: aparato, señal (ANT+/BLE), valor y batería por hueco (spec 007, T-04). Solo lectura: los
+     * sensores los mantienen en marcha los observadores de [startScanning].
+     */
+    val slots: StateFlow<List<SlotStatus>> = combine(
+        sensorManager.hrSlotStatus(0), sensorManager.hrSlotStatus(1),
+        sensorManager.cadenceSlotStatus(0), sensorManager.cadenceSlotStatus(1)
+    ) { h1, h2, c1, c2 -> listOf(h1, h2, c1, c2) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), List(4) { SlotStatus(it % 2) })
 
     private var hrScanJob: Job? = null
     private var cadenceScanJob: Job? = null

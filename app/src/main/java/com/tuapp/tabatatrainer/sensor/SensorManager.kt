@@ -54,6 +54,11 @@ class SensorManager @Inject constructor(
     fun hrBattery(slot: Int): StateFlow<SensorBattery?> = heartRateHub.slotBattery(slot)
     fun cadenceBattery(slot: Int): StateFlow<SensorBattery?> = cadenceHub.slotBattery(slot)
 
+    // Estado de cada hueco: aparato, señal (ANT+/BLE), valor (1 Hz) y batería (spec 007, T-04).
+    // Solo lectura: observarlo NO arranca los sensores (eso lo hacen observeHeartRate* / observeCadence*)
+    fun hrSlotStatus(slot: Int): StateFlow<SlotStatus> = heartRateHub.slotStatus(slot)
+    fun cadenceSlotStatus(slot: Int): StateFlow<SlotStatus> = cadenceHub.slotStatus(slot)
+
     /** Fuerza una reconexión completa de pulso y cadencia (botón "reconectar") */
     fun resetFlows() {
         Timber.d("🔄 SensorManager: reconexión de pulso y cadencia")

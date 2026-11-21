@@ -87,6 +87,7 @@ fun ConfigScreen(
     }
 
     val bleStatus by viewModel.bleStatus.collectAsState()
+    val sensorSlots by viewModel.slots.collectAsState()
 
     // Detección de entrenamiento en curso
     var activeWorkout by remember { mutableStateOf(ActiveWorkoutInfo()) }
@@ -289,6 +290,7 @@ fun ConfigScreen(
                         // Sensores compactos
                         CompactSensorRowWithGps(
                             bleStatus = bleStatus,
+                            slots = sensorSlots,
                             onRefresh = { viewModel.startScanning() },
                             onGpsToggle = { viewModel.setGpsEnabled(it) }
                         )
@@ -351,6 +353,7 @@ fun ConfigScreen(
                 // Sensores compactos con GPS
                 CompactSensorRowWithGps(
                     bleStatus = bleStatus,
+                    slots = sensorSlots,
                     onRefresh = { viewModel.startScanning() },
                     onGpsToggle = { viewModel.setGpsEnabled(it) }
                 )
@@ -473,6 +476,7 @@ private fun TotalTimeCard(totalSeconds: Int) {
 @Composable
 private fun CompactSensorRowWithGps(
     bleStatus: BleScanStatus,
+    slots: List<SlotStatus>,
     onRefresh: () -> Unit,
     onGpsToggle: (Boolean) -> Unit
 ) {
@@ -488,33 +492,32 @@ private fun CompactSensorRowWithGps(
                 .fillMaxWidth()
                 .padding(12.dp)
         ) {
-            // Fila de sensores
+            // Sensores por hueco (spec 007, T-04): HR1 HR2 / C1 C2, cada uno con valor, señal y batería
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    // HR
-                    SensorStatusChip(
-                        icon = Icons.Default.Favorite,
-                        label = "HR",
-                        isConnected = bleStatus.hrConnected,
-                        isScanning = bleStatus.hrScanning,
-                        value = if (bleStatus.hrValue > 0) "${bleStatus.hrValue}" else null
-                    )
-
-                    // Cadencia
-                    SensorStatusChip(
-                        icon = Icons.AutoMirrored.Filled.DirectionsBike,
-                        label = "CAD",
-                        isConnected = bleStatus.cadenceConnected,
-                        isScanning = bleStatus.cadenceScanning,
-                        value = if (bleStatus.cadenceValue > 0) "${bleStatus.cadenceValue}" else null
-                    )
+                    for (row in 0..1) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            for (col in 0..1) {
+                                val i = row * 2 + col
+                                SlotStatusChip(
+                                    label = SENSOR_SLOT_LABELS[i],
+                                    slot = slots[i],
+                                    isCadence = row == 1,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
                 }
 
                 IconButton(
@@ -596,63 +599,38 @@ private fun CompactSensorRowWithGps(
 }
 
 /**
- * Chip de estado de sensor individual
+ * Un hueco (HR1/HR2/C1/C2) en Config (spec 007, T-04): valor + hueco + señal (ANT+ verde / BLE azul) + batería.
+ * Color del valor: verde con señal, naranja buscando (hueco libre), rojo si el aparato del hueco perdió la señal.
+ * En cadencia 0 rpm con señal es un dato válido y se muestra "0".
  */
 @Composable
-private fun SensorStatusChip(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+private fun SlotStatusChip(
     label: String,
-    isConnected: Boolean,
-    isScanning: Boolean,
-    value: String? = null
+    slot: SlotStatus,
+    isCadence: Boolean,
+    modifier: Modifier = Modifier
 ) {
-    val color = when {
-        isConnected -> TabataColors.Connected
-        isScanning -> TabataColors.Scanning
-        else -> TabataColors.Disconnected
+    val state = slot.signalState
+    val color = when (state) {
+        SlotSignalState.SIGNAL -> TabataColors.Connected
+        SlotSignalState.SEARCHING -> TabataColors.Scanning
+        SlotSignalState.LOST -> Color(0xFFE53935)
     }
+    val value = if (state == SlotSignalState.SIGNAL && (isCadence || slot.value > 0)) "${slot.value}" else "--"
 
     Row(
+        modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = label,
-            tint = color,
-            modifier = Modifier.size(20.dp)
+        Text(
+            text = value,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            color = color,
+            maxLines = 1
         )
-
-        if (value != null && isConnected) {
-            Text(
-                text = value,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                color = color
-            )
-        } else {
-            Text(
-                text = label,
-                fontSize = 12.sp,
-                color = color
-            )
-        }
-
-        // Indicador de estado
-        Box(
-            modifier = Modifier
-                .size(6.dp)
-                .background(color, androidx.compose.foundation.shape.CircleShape)
-        )
-
-        // Spinner si está buscando
-        if (isScanning) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(12.dp),
-                strokeWidth = 1.5.dp,
-                color = TabataColors.Scanning
-            )
-        }
+        SensorSlotBadge(label, slot, labelColor = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
     }
 }
 

@@ -6,6 +6,49 @@ memoria privada de Claude. **Lo más reciente arriba.**
 
 ---
 
+## 2026-11-21 — Spec 007 · T-04: hueco y señal en Tabata y Config
+
+### Contexto
+T-01…T-03 validadas (1.6.113). El usuario pidió empezar T-04 sin compilar ni instalar.
+
+### Hecho
+- `plan.md` §7 anotado antes del código: ampliación del contrato de `SensorManager` y detalle de T-04.
+- `SensorManager`: `hrSlotStatus(slot)` / `cadenceSlotStatus(slot)` (solo lectura; no arrancan los sensores).
+- Nuevo `ui/components/SensorSlotBadge.kt`: `ProtocolBadge` (sale de `WorkoutScreen`), `SensorSlotBadge`
+  (hueco + ANT+/BLE + batería), `SensorSlotsViewModel` + `rememberSensorSlots()`, `SlotStatus.signalState`.
+- Tabata: panel de métricas con señal y batería desde `SlotStatus` (el número sigue saliendo del servicio); chips
+  superiores sin icono, punto verde/naranja/rojo por hueco; la barra deja 44 dp a la flecha de volver (tapaba HR1).
+- Config: HR1 HR2 / C1 C2 en rejilla 2×2 con valor, señal y batería; 0 rpm con señal se ve "0".
+- Sin tocar `WorkoutService`, Home (usa `BleScanStatus`, se queda igual hasta T-06), Room, Gradle, `NavGraph.kt`.
+
+### Validación (1.6.117, instalada 14:25)
+- Logcat: sin cierres. Una banda dual (xoss 56551 / XOSS_X2P_842983) → HR1 por ANT+; paso a BLE 9 s y vuelta a
+  ANT+ sin cambiar de hueco. Tabata en marcha 14:26–14:28 sin errores de la app (el
+  `JobCancellationException` de `ConfigViewModel` al pulsar INICIAR ya salía antes: su `catch` lo registra).
+- Tests (14:29): 187/187 verdes, 0 fallos, 0 errores.
+- Capturas del usuario (Tabata vertical en Preparado y Calentamiento, horizontal en Trabajo): HR1 ya no queda
+  bajo la flecha; punto verde en HR1 y naranja en HR2/C1/C2 (sin aparato); panel con "HR1 ANT+" verde y
+  batería 100 %; huecos vacíos con "--". Bien en las tres.
+
+- Capturas 14:35–14:41 con dos bandas: Config muestra "73 HR1 ANT+ 100 %" y "77 HR2 ANT+ 100 %", C1/C2 "--";
+  Tabata con HR1 y HR2 por ANT+ y batería cada uno. HR1 = XOSS X2P, HR2 = Decathlon Dual HR (ANT+ 8298).
+- Pregunta del usuario: la línea azul (HR2) sale más "ruidosa" que la amarilla. Análisis de `sensor_readings`
+  (sesión 489fe1df, 14:38–14:41, copia de la BD por `run-as`): salto medio por segundo HR2 1,21 / 1,86 / 0,93
+  frente a HR1 0,82 / 0,69 / 0,42 en los tres tramos; tras intercambiar la posición de las bandas el ruido sigue
+  en la Decathlon → es la banda, no la posición ni la app (las dos van por el mismo código ANT+, sin filtro; el
+  valor lo calcula cada banda). La diferencia de nivel (+5 bpm sentado) bajó a −1 bpm al final (contacto/postura).
+- Visto de paso: al quitarse una banda, ANT+ sigue mandando el último valor ~10–20 s (HR1 fijo en 83, HR2 en 70)
+  antes de apagarse. No es de T-04.
+
+### Cierre
+- T-04 marcada `[x]` en `tasks.md` con el visto bueno del usuario; `traspaso.md` al día.
+
+### Pendiente
+- Commit de T-04 cuando el usuario lo pida (incluye `version.properties`).
+- Siguiente: T-05 (Ruta Libre separada), solo cuando el usuario la pida.
+
+---
+
 ## 2026-11-21 — Spec 007 · T-03: prueba real 1.6.111 y arreglo del tirón ANT+
 
 ### Contexto
@@ -27,7 +70,9 @@ El usuario probó la 1.6.111 (T-03) con las dos bandas; no tiene los cadencióme
 - T-02 y T-03 marcadas `[x]`. A T-07: cadencia real y HR2 apagado en Home al quitar una banda.
 
 ### Pendiente
-- Commit (cuando lo pida el usuario). Siguiente tarea: T-04, cuando el usuario la pida.
+- Commit `7ccad3a` hecho a petición del usuario. `traspaso.md` reescrito para empezar T-04 en un hilo nuevo
+  (punto de partida: `SlotStatus` aún no expuesto en `SensorManager`; Tabata con `ProtocolBadge` propio; Config
+  solo HR1/C1; flecha de volver tapa HR1 en Tabata).
 
 ---
 

@@ -4,85 +4,74 @@ Documento para continuar en un hilo nuevo. Pegar en el hilo nuevo:
 
 > Lee `AGENTS.md`, `docs/constitution.md`, `specs/007-dual-signal-devices/{spec.md, plan.md, tasks.md, traspaso.md}`
 > y la primera entrada de `00_estado_proyecto_y_memoria.md`. Seguimos con la spec 007 en la rama
-> `spec-007-dual-signal-devices`. Sigue T-03 (Cadencia): valida con mis pruebas (lee tú los resultados de tests
-> y el Logcat del móvil). No compiles ni instales (lo hago yo).
+> `spec-007-dual-signal-devices`. Empieza T-05 (Ruta Libre separada). Valida con mis pruebas (lee tú
+> los resultados de tests y el Logcat del móvil). No compiles ni instales (lo hago yo).
 
-## Objetivo
+## Objetivo de la spec
 - Un aparato físico (pulsómetro o cadenciómetro, emite por ANT+ y BLE) = un hueco fijo (HR1/HR2, C1/C2).
 - ANT+ siempre preferente; BLE solo de respaldo, sin cambiar de hueco.
 - Funciona con dos bandas a la vez.
-- En todas las pantallas se ve hueco + señal (ANT+/BLE). Cadencia con el mismo criterio.
+- En todas las pantallas se ve hueco + señal (ANT+ verde / BLE azul) y batería (R6). Cadencia con el mismo criterio.
+
+## Estado (último commit `7ccad3a`, versión instalada 1.6.117)
+- **T-01 [x]** registro genérico `SensorDeviceRegistry`/`DeviceBook` + `PairingPolicy`.
+- **T-02 [x]** `DualSlotAllocator` (huecos fijos, ANT+ desplaza a BLE, cuarentena, `SlotStatus`).
+- **T-03 [x]** salvo prueba real de cadencia: `CadenceHub`, `CscParser`, `AntRadio` (una búsqueda ANT+
+  compartida; el cierre va en segundo plano y se espera con `awaitClosed()`), `SensorManager` como fachada.
+  Suite 187/187 verde con la 1.6.113; dos bandas en HR1/HR2 por ANT+.
+- **Aplazado a T-07:** cadencia real (el usuario no tiene los cadenciómetros a mano) y comprobar que HR2 se
+  apaga en Home al quitar una banda.
+- **T-04 [x]** validada 2026-11-21 con la 1.6.117 (suite 187/187; capturas de Tabata y Config con dos bandas):
+  `SensorManager.hrSlotStatus/cadenceSlotStatus`; `ui/components/SensorSlotBadge.kt` (`ProtocolBadge`,
+  `SensorSlotBadge`, `SensorSlotsViewModel` + `rememberSensorSlots()`, `SlotStatus.signalState`); Tabata con
+  señal/batería/punto desde `SlotStatus` y barra superior apartada de la flecha; Config con rejilla HR1 HR2 / C1 C2.
+  Detalle en `plan.md` §7. T-05, T-06, T-07 sin empezar. Una tarea cada vez.
+
+## T-04 — punto de partida (hueco y señal en Tabata y Config)
+- Qué pide (`tasks.md`, `plan.md` §7): componente `ui/components/SensorSlotBadge.kt` (HR1/HR2/C1/C2 +
+  insignia ANT+/BLE + batería, reutilizando `ProtocolBadge`); Tabata lee `SlotStatus`; Config muestra
+  HR1/HR2/C1/C2 con su señal.
+- Lo que ya existe:
+  - `SlotStatus(slot, deviceKey, alias, sourceId, sourceName, protocol, connected, value, battery)` en
+    `sensor/DualSlotAllocator.kt`. Los hubs lo exponen: `HeartRateHub.slotStatus(slot)` y
+    `CadenceHub.slotStatus(slot)` (`StateFlow`). **`SensorManager` aún no lo expone**: hay que añadir
+    `hrSlotStatus(slot)` / `cadenceSlotStatus(slot)` — es ampliar el contrato (permitido por la spec: "solo se
+    amplía"), anotarlo en `plan.md` antes.
+  - Tabata (`ui/workout/WorkoutScreen.kt`): ya pinta HR1/HR2/C1/C2 (≈ l. 832–853 y 913–1000) con una lista
+    `protocols` y un `ProtocolBadge` privado (≈ l. 1042) → sacarlo a `SensorSlotBadge` y alimentarlo con
+    `SlotStatus`.
+  - Config (`ui/config/ConfigScreen.kt` + `ConfigViewModel.kt`): solo HR1 y C1 (`observeCadence()`); añadir
+    HR2 y C2 con señal.
+  - Baterías por hueco: `SensorManager.hrBattery(slot)` / `cadenceBattery(slot)` (Home las usa vía
+    `SensorBatteryViewModel`).
+- Fallo visual conocido a arreglar en T-04: en Tabata la flecha de volver tapa el chip HR1.
+- No tocar en T-04: Ruta Libre (es T-05), Home y la hoja "Dispositivos" / `SensorBar` (es T-06).
+
+## Observaciones de la última prueba (1.6.111 → 1.6.113)
+- Al arrancar, el receptor ANT+ a veces responde ADAPTER_NOT_DETECTED 1–2 min (del móvil/servicio ANT+; ya
+  pasaba antes). Mientras, las bandas van por BLE. En la 1.6.113 respondió a los 3 s.
+- Cortes ANT+→BLE de pocos segundos sin cambiar de hueco: es R2 funcionando.
+- Posible mejora no hecha (pedir antes): acortar la pausa entre ventanas de búsqueda ANT+ (15 s) para que la
+  2.ª banda pase antes a ANT+.
+- Peticiones del usuario ya cubiertas por la spec: Ruta con HR1/HR2 y C1/C2 separados (prefiere ver los dos)
+  → T-05. Detalle de sesión sin C2 → fuera de alcance (Room), posible spec futura.
 
 ## Decisiones del usuario
 - Emparejado automático (solo si es seguro) + manual.
 - Hueco fijo por aparato. Ruta Libre con HR1/HR2 y C1/C2 separados, como Tabata.
 - **R8.1–R8.3:** la hoja "Dispositivos" (`ModalBottomSheet`, sin tocar `NavGraph.kt`) se abre tocando la barra
-  de sensores en **todas** las pantallas que la tienen (Home, Tabata, Ruta Libre también en marcha, Config).
-  Barra común `SensorBar`; la flecha de refrescar sigue reconectando; abrir la hoja no para la sesión. Va en T-06.
-
-## Estado de las tareas (`tasks.md`)
-- **T-01 [x]** validada: registro genérico `SensorDeviceRegistry`/`DeviceBook` + `PairingPolicy`.
-- **T-02 [~]** prueba real OK del usuario con la **v1.6.106** (ANT+↔BLE, dos bandas, poner/quitar):
-  - `sensor/DualSlotAllocator.kt` (lógica pura): hueco preferido con reserva blanda, ANT+ desplaza a BLE,
-    hueco ANT+ caído reservado 60 s frente a aparatos solo-BLE, cuarentena 30 s, relevo, `SlotStatus`.
-  - `HeartRateHub` lo usa; radios fuera a los 5 s sin observadores y huecos olvidados 55 s después.
-    `slotStatus(slot)` expuesto (aún sin uso en UI). Contrato de `SensorManager` intacto.
-  - Fallo visto en la 1.6.106: tras quitar una banda, Home seguía mostrando HR2 activo con batería (Home deduce
-    HR2/C2 "conectado" de la batería). **Corregido después de la 1.6.106** en `DualSlotAllocator.pickSource`
-    (sin fuente → batería null) + test `aparato quitado deja el hueco sin bateria`. Commit `9c89ebb`.
-  - La suite (1.ª vez que se pasaba entera) falló en `una ANT caida un momento no cede su hueco…`: al cumplir
-    la cuarentena sin hueco libre se borraba y volvía a empezar, y el BLE nunca cogía el hueco huérfano.
-    Corregido en `DualSlotAllocator.assignPending` (se borra solo al asignar). En el commit de T-03.
-    **Falta repetir la suite** con el arreglo.
-  - Para cerrarla: el usuario compila (1.6.107 o la que incluya T-03), pasa la suite y comprueba que HR2 se
-    apaga en Home al quitar una banda. Con eso, marcar T-02 `[x]`.
-- **T-03 [~] Cadencia** — código hecho y en commit (2026-11-21, ver `git log`). Compila (BUILD 111) y sus 21
-  tests nuevos pasan; **falta** repetir la suite entera y la prueba real:
-  - `sensor/AntRadio.kt`: una sola búsqueda ANT+ multi-dispositivo para pulso y cadencia (unión de tipos,
-    ventanas 15/15 s, se cierra antes de pedir acceso, no busca mientras alguien conecta, límite 20 s).
-    `HeartRateHub` ya no tiene búsqueda propia: la usa (cambio también en el pulso → probar 💓).
-  - `sensor/CadenceHub.kt`: espejo de `HeartRateHub` (`DualSlotAllocator(CADENCE, …, "C")`, `PairingPolicy`
-    CADENCE, BLE CSC 0x1816 con escaneo continuo, ANT+ `BIKE_CADENCE` solo cadencia). 0 rpm es dato válido:
-    3 s sin vuelta → 0 sin desconectar; fresca = conectada y con dato en 5 s (ANT+: evento en bruto la mantiene
-    viva aunque esté parada).
-  - `sensor/CscParser.kt`: rpm BLE desde vueltas/tiempo de biela (desbordamiento 16 bits, 0–300).
-  - `PairingPolicy`: un historial solo de ceros no empareja por valores (dos cadenciómetros parados son
-    iguales y un agrupado de sesión erróneo no se deshace). Sin efecto en el pulso.
-  - `SensorManager` reducido a fachada (mismo contrato público). Borrados `BleManagers.kt`, `createCadenceFlow*`,
-    autoconexión por `DeviceProfileDao` (DAO y entidad de Room siguen, sin uso) y `CADENCE_ANT_PLUS_DELAY_MS`.
-  - Tests nuevos: `CadenceSlotAllocatorTest`, `CadencePairingTest`, `CscParserTest`.
-  - Para cerrarla: compilar, suite verde, prueba real con Logcat `🚴` y `💓` (ver bitácora).
-  - Punto a vigilar: si al dejar de pedalear un ANT+ no aparece "parado, 0 rpm" en ~3 s, el plugin repite la
-    última cadencia; arreglo previsto: marcar vuelta solo cuando cambie el contador acumulado del evento en bruto.
-  - **Prueba real 1.6.111** (usuario, sin cadenciómetros): dos bandas en HR1/HR2 por ANT+ → OK. Visto:
-    1. Tirón de ~1 s cada 30 s: `MultiDeviceSearch.close()` en el hilo principal (Logcat "Long monitor
-       contention … AntRadio"). **Corregido** (sin compilar): cierre en segundo plano y `awaitClosed()` antes de
-       pedir acceso o abrir otra búsqueda.
-    2. Paso BLE→ANT+ lento: al arrancar, el receptor ANT+ responde ADAPTER_NOT_DETECTED 1–2 min (también en
-       versiones anteriores; es del móvil/servicio ANT+). Luego la 2.ª banda entra en la siguiente ventana.
-       Posible mejora (no hecha, pedir antes): acortar la pausa entre ventanas.
-    3. Ruta muestra un solo "HR" y una cadencia → es T-05 (R7). El usuario prefiere ver los dos.
-    4. Detalle de sesión sin C2 → fuera de alcance (Room); posible spec futura.
-  - **1.6.113 validada:** suite 187/187 verde; el bloqueo de ~1 s ya no es del hilo principal (queda en un hilo
-    de fondo, sin efecto en pantalla). T-02 y T-03 marcadas `[x]`; la cadencia real y "HR2 se apaga en Home"
-    pasan a T-07. Cortes ANT+→BLE de pocos segundos sin cambiar de hueco (R2 funcionando), también en la 1.6.111.
-  - **Siguiente: T-04** (hueco y señal en Tabata y Config), solo cuando el usuario lo pida.
-- **T-04 … T-07** sin empezar. Una tarea cada vez.
-
-## Pendiente
-- Fallo visual conocido: la flecha de volver tapa el chip HR1 en Tabata → se arregla en T-04.
-- Usuario: repetir la suite y prueba real de T-02/T-03. Agente: leer la evidencia y, si va bien, proponer
-  marcar T-02 y T-03 `[x]`.
+  de sensores en todas las pantallas (Home, Tabata, Ruta también en marcha, Config). Barra común `SensorBar`;
+  la flecha de refrescar sigue reconectando; abrir la hoja no para la sesión. Va en T-06.
 
 ## Reglas que no hay que olvidar
 - El agente no ejecuta Gradle ni `adb install` (hook lo bloquea; ojo: también bloquea comandos de shell que
   contengan el texto "gradlew"). `adb` está en
   `C:\Users\APO\AppData\Local\Android\Sdk\platform-tools\adb.exe` (solo lectura: `devices`, `logcat`).
-- **La evidencia la lee el agente, no se pide en capturas:** el S22+ está conectado por adb inalámbrico
-  (`adb devices` → `adb-R3CTA0JHTEZ-…`) y, tras compilar el usuario, los resultados de tests quedan en
-  `app/build/test-results/testDebugUnitTest/*.xml`.
-- La versión instalada se ve en `version.properties` (BUILD sube en cada APK): sirve para saber si el usuario
-  probó con el código actual.
-- Sin dependencias Gradle, sin cambios en Room, sin tocar el contrato de `SensorManager` sin spec.
+  Hay dos dispositivos en `adb devices` (uno "offline"): usar `-s adb-R3CTA0JHTEZ-ORXOOh._adb-tls-connect._tcp`.
+- **La evidencia la lee el agente, no se pide en capturas:** S22+ por adb inalámbrico; tras compilar el
+  usuario, los tests quedan en `app/build/test-results/testDebugUnitTest/*.xml`.
+- La versión instalada se ve en `version.properties` (BUILD sube en cada APK) y con
+  `adb shell dumpsys package com.tuapp.tabatatrainer` (versionName, lastUpdateTime).
+- Sin dependencias Gradle, sin cambios en Room, sin tocar el contrato de `SensorManager` sin spec (solo ampliar).
 - Código en inglés; UI y documentación en español. Anotar cada sesión en `00_estado_proyecto_y_memoria.md`.
-- Commit solo cuando el usuario lo pida.
+- Commit solo cuando el usuario lo pida (`version.properties` va en el commit).

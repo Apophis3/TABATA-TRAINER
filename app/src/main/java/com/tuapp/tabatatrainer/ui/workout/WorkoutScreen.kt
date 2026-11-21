@@ -12,7 +12,9 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -47,10 +49,13 @@ import com.tuapp.tabatatrainer.data.local.WorkoutState
 import com.tuapp.tabatatrainer.data.local.SensorState
 import com.tuapp.tabatatrainer.data.local.SessionStats
 import com.tuapp.tabatatrainer.service.WorkoutService
-import com.tuapp.tabatatrainer.sensor.SensorBattery
-import com.tuapp.tabatatrainer.ui.components.BatteryBadge
+import com.tuapp.tabatatrainer.sensor.SlotStatus
 import com.tuapp.tabatatrainer.ui.components.BatteryLowWarnings
-import com.tuapp.tabatatrainer.ui.components.rememberSensorBatteries
+import com.tuapp.tabatatrainer.ui.components.SENSOR_SLOT_LABELS
+import com.tuapp.tabatatrainer.ui.components.SensorSlotBadge
+import com.tuapp.tabatatrainer.ui.components.SlotSignalState
+import com.tuapp.tabatatrainer.ui.components.rememberSensorSlots
+import com.tuapp.tabatatrainer.ui.components.signalState
 
 // ============================================================================
 // PALETA NIKE - SOLO CAMBIO DE COLORES
@@ -66,6 +71,9 @@ private object TabataColors {
     val HrPink = Color(0xFFF1DE33)
     val HrCyan = Color(0xFF00BCD4)
 }
+
+/** Hueco a la izquierda de la barra superior para la flecha de volver (8 dp de margen + 48 dp de botón − 16 dp de padding) */
+private val BACK_ARROW_CLEARANCE = 44.dp
 
 // ============================================================================
 // PANTALLA PRINCIPAL DE ENTRENAMIENTO
@@ -322,15 +330,19 @@ private fun PortraitWorkoutLayout(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Barra superior: chips de sensores + refrescar
+        // Barra superior: chips de sensores + refrescar. El margen izquierdo deja sitio a la flecha de volver
+        // (se pinta encima, en WorkoutScreen) para que no tape HR1
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = BACK_ARROW_CLEARANCE),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
             SensorStatusChips(
                 sensorState = sensorState,
-                gpsEnabled = gpsEnabled
+                gpsEnabled = gpsEnabled,
+                modifier = Modifier.weight(1f, fill = false)
             )
             if (workoutState.phase == WorkoutPhase.IDLE || workoutState.isRunning) {
                 Spacer(modifier = Modifier.width(8.dp))
@@ -403,7 +415,6 @@ private fun PortraitWorkoutLayout(
             isHrConnected = sensorState.isHrConnected,
             isHr2Connected = sensorState.isHr2Connected,
             isCadenceConnected = sensorState.isCadenceConnected,
-            protocols = listOf(sensorState.hrProtocol, sensorState.hr2Protocol, sensorState.cadenceProtocol, sensorState.cadence2Protocol),
             isCadence2Connected = sensorState.isCadence2Connected
         )
 
@@ -458,15 +469,19 @@ private fun LandscapeWorkoutLayout(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Barra superior: chips de sensores + refrescar
+        // Barra superior: chips de sensores + refrescar. El margen izquierdo deja sitio a la flecha de volver
+        // (se pinta encima, en WorkoutScreen) para que no tape HR1
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = BACK_ARROW_CLEARANCE),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
             SensorStatusChips(
                 sensorState = sensorState,
-                gpsEnabled = gpsEnabled
+                gpsEnabled = gpsEnabled,
+                modifier = Modifier.weight(1f, fill = false)
             )
             if (workoutState.phase == WorkoutPhase.IDLE || workoutState.isRunning) {
                 Spacer(modifier = Modifier.width(8.dp))
@@ -572,7 +587,6 @@ private fun LandscapeWorkoutLayout(
                 isHrConnected = sensorState.isHrConnected,
                 isHr2Connected = sensorState.isHr2Connected,
                 isCadenceConnected = sensorState.isCadenceConnected,
-                protocols = listOf(sensorState.hrProtocol, sensorState.hr2Protocol, sensorState.cadenceProtocol, sensorState.cadence2Protocol),
                 isCadence2Connected = sensorState.isCadence2Connected,
                 heightScale = bottomScale,
                 modifier = Modifier.weight(1f)
@@ -821,43 +835,28 @@ private fun TotalTimeDisplay(totalSeconds: Int, isLandscape: Boolean, heightScal
     }
 }
 
+/**
+ * Chips compactos de la barra superior (spec 007, T-04): punto verde = hueco con señal, naranja = buscando
+ * (hueco libre), rojo = el aparato del hueco ha perdido la señal. Sin icono para que quepan junto a la flecha
+ * de volver; si aun así no caben (GPS + pantalla estrecha) se desplazan en horizontal.
+ */
 @Composable
-private fun SensorStatusChips(sensorState: SensorState, gpsEnabled: Boolean) {
+private fun SensorStatusChips(sensorState: SensorState, gpsEnabled: Boolean, modifier: Modifier = Modifier) {
+    val slots = rememberSensorSlots()
     Row(
-        horizontalArrangement = Arrangement.Center,
+        modifier = modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        SensorChip(
-            icon = Icons.Default.Favorite,
-            label = "HR1",
-            isConnected = sensorState.isHrConnected,
-            isScanning = sensorState.isHrScanning
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        SensorChip(
-            icon = Icons.Default.Favorite,
-            label = "HR2",
-            isConnected = sensorState.isHr2Connected,
-            isScanning = sensorState.isHr2Scanning
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        SensorChip(
-            icon = Icons.AutoMirrored.Filled.DirectionsBike,
-            label = "C1",
-            isConnected = sensorState.isCadenceConnected,
-            isScanning = sensorState.isCadenceScanning
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        SensorChip(
-            icon = Icons.AutoMirrored.Filled.DirectionsBike,
-            label = "C2",
-            isConnected = sensorState.isCadence2Connected,
-            isScanning = sensorState.isCadence2Scanning
-        )
-        if (gpsEnabled) {
-            Spacer(modifier = Modifier.width(12.dp))
+        slots.forEachIndexed { i, slot ->
             SensorChip(
-                icon = Icons.Default.LocationOn,
+                label = SENSOR_SLOT_LABELS[i],
+                isConnected = slot.signalState == SlotSignalState.SIGNAL,
+                isScanning = slot.signalState == SlotSignalState.SEARCHING
+            )
+        }
+        if (gpsEnabled) {
+            SensorChip(
                 label = "GPS",
                 isConnected = sensorState.isGpsTracking,
                 isScanning = false
@@ -867,23 +866,21 @@ private fun SensorStatusChips(sensorState: SensorState, gpsEnabled: Boolean) {
 }
 
 @Composable
-private fun SensorChip(icon: ImageVector, label: String, isConnected: Boolean, isScanning: Boolean = false) {
+private fun SensorChip(label: String, isConnected: Boolean, isScanning: Boolean = false) {
     val dotColor = when {
         isConnected -> TabataColors.Connected
         isScanning -> Color(0xFFFFA500)
         else -> TabataColors.RestRed
     }
-    
+
     Row(
         modifier = Modifier
             .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(20.dp))
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, null, tint = Color.White, modifier = Modifier.size(16.dp))
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(label, color = Color.White, fontSize = 12.sp)
-        Spacer(modifier = Modifier.width(6.dp))
+        Text(label, color = Color.White, fontSize = 12.sp, maxLines = 1)
+        Spacer(modifier = Modifier.width(4.dp))
         Box(
             modifier = Modifier
                 .size(8.dp)
@@ -910,11 +907,11 @@ private fun MetricsPanel(
     isHr2Connected: Boolean = false,
     isCadenceConnected: Boolean = false,
     isCadence2Connected: Boolean = false,
-    protocols: List<String?> = listOf(null, null, null, null),   // HR1, HR2, C1, C2
     heightScale: Float = 1f,
     modifier: Modifier = Modifier.fillMaxWidth()
 ) {
-    val batteries = rememberSensorBatteries()
+    // Hueco, señal (ANT+/BLE) y batería de HR1, HR2, C1, C2 (spec 007, T-04). El número en vivo viene del servicio
+    val slots = rememberSensorSlots()
     // Estrecho (móvil en vertical): 2 filas de 3; ancho: 1 fila de 6 (spec 005 T-05)
     // heightScale reduce paddings/fuentes solo en el bloque inferior del horizontal en móvil
     BoxWithConstraints(
@@ -931,8 +928,7 @@ private fun MetricsPanel(
                 label = "HR1",
                 isPrimary = true,
                 color = TabataColors.HrPink,
-                protocol = protocols[0],
-                battery = batteries[0],
+                slot = slots[0],
                 heightScale = heightScale
             )
         }
@@ -955,8 +951,7 @@ private fun MetricsPanel(
                 unit = "rpm",
                 label = "C1",
                 isPrimary = true,
-                protocol = protocols[2],
-                battery = batteries[2],
+                slot = slots[2],
                 heightScale = heightScale
             )
         }
@@ -969,8 +964,7 @@ private fun MetricsPanel(
                 label = "HR2",
                 isPrimary = true,
                 color = TabataColors.HrCyan,
-                protocol = protocols[1],
-                battery = batteries[1],
+                slot = slots[1],
                 heightScale = heightScale
             )
         }
@@ -993,8 +987,7 @@ private fun MetricsPanel(
                 unit = "rpm",
                 label = "C2",
                 isPrimary = true,
-                protocol = protocols[3],
-                battery = batteries[3],
+                slot = slots[3],
                 heightScale = heightScale
             )
         }
@@ -1010,7 +1003,7 @@ private fun MetricsPanel(
 }
 
 @Composable
-private fun MetricItem(icon: ImageVector, value: String, unit: String, label: String, isPrimary: Boolean = false, color: Color = Color.White, protocol: String? = null, battery: SensorBattery? = null, heightScale: Float = 1f) {
+private fun MetricItem(icon: ImageVector, value: String, unit: String, label: String, isPrimary: Boolean = false, color: Color = Color.White, slot: SlotStatus? = null, heightScale: Float = 1f) {
     // Sin icono (ahorra altura, spec 005 T-05): valor grande y debajo una sola fila etiqueta + protocolo + batería
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Row(verticalAlignment = Alignment.Bottom) {
@@ -1029,28 +1022,13 @@ private fun MetricItem(icon: ImageVector, value: String, unit: String, label: St
                 modifier = Modifier.padding(start = 2.dp, bottom = 4.dp)
             )
         }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        // Hueco + señal (ANT+ verde / BLE azul) + batería debajo (spec 007, T-04)
+        if (slot != null) {
+            SensorSlotBadge(label, slot, labelColor = color.copy(alpha = 0.6f), fontSize = (11f * heightScale).sp, stacked = true)
+        } else {
             Text(label, fontSize = (11f * heightScale).sp, color = color.copy(alpha = 0.6f), maxLines = 1)
-            ProtocolBadge(protocol)
         }
-        BatteryBadge(battery, modifier = Modifier.padding(top = 2.dp))
     }
-}
-
-/** Etiqueta pequeña con el protocolo del sensor: ANT+ en verde, BLE en azul */
-@Composable
-private fun ProtocolBadge(protocol: String?) {
-    if (protocol == null) return
-    val c = if (protocol.startsWith("ANT")) Color(0xFF66BB6A) else Color(0xFF42A5F5)
-    Text(
-        text = protocol,
-        fontSize = 9.sp,
-        fontWeight = FontWeight.Bold,
-        color = c,
-        modifier = Modifier
-            .background(c.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-            .padding(horizontal = 4.dp, vertical = 1.dp)
-    )
 }
 
 @Composable

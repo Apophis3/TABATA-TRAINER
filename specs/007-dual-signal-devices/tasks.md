@@ -27,7 +27,14 @@ usuario confirme la anterior con evidencia. El agente **no** ejecuta Gradle ni `
   compartida. Fallo visto: tirón de ~1 s cada 30 s (cierre de la búsqueda ANT+ en el hilo principal) →
   corregido, el cierre va en segundo plano. 1.6.113: el hilo principal ya no se bloquea (la espera de ~1 s del
   plugin queda en un hilo de fondo); ANT+ encontrada a los 3 s del arranque.
-- [ ] T-04 **Hueco y señal en Tabata y Config.** `SensorSlotBadge`; Tabata lee `SlotStatus`; Config HR1/HR2/C1/C2.
+- [x] T-04 *(validada 2026-11-21 con la 1.6.117: suite 187/187 verde; capturas del usuario de Tabata en vertical y horizontal y de Config, con una y dos bandas por ANT+)*
+  **Hueco y señal en Tabata y Config.** `SensorSlotBadge`; Tabata lee `SlotStatus`; Config HR1/HR2/C1/C2.
+  Hecho: `SensorManager.hrSlotStatus/cadenceSlotStatus` (solo lectura); `ui/components/SensorSlotBadge.kt`
+  (`ProtocolBadge`, `SensorSlotBadge`, `SensorSlotsViewModel`, `SlotStatus.signalState`); Tabata con señal y
+  batería por hueco y barra superior apartada de la flecha; Config en rejilla HR1 HR2 / C1 C2.
+  Visto en la prueba: la Decathlon (HR2) da una línea más irregular que la XOSS (HR1) aunque se cambien de
+  sitio → es la banda (cada una calcula su valor), no la app. Fuera de T-04: el lápiz de Config tapa en parte
+  el interruptor del GPS; al quitar una banda ANT+ sigue dando el último valor ~10–20 s.
 - [ ] T-05 **Ruta Libre separada.** HR1/HR2 y C1/C2 con señal; medias HR1/HR2 separadas; escucha C2.
 - [ ] T-06 **Hoja "Dispositivos" común + Home.** Estado real por hueco en Home; hoja con
   unir/separar/renombrar/hueco/olvidar/reconectar/guiado; barra de sensores común `SensorBar` que abre la hoja

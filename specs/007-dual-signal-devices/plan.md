@@ -96,16 +96,30 @@
 ### 7. Pantallas
 - `ui/components/SensorSlotBadge.kt`: HR1/HR2/C1/C2 + insignia ANT+/BLE + batería (reutiliza `ProtocolBadge`).
 - Tabata: leer `SlotStatus`. Config: HR1/HR2/C1/C2 con señal. Home: estado real por hueco.
+- Detalle (T-04):
+  - **Ampliación del contrato de `SensorManager`** (solo se añade): `hrSlotStatus(slot)` y
+    `cadenceSlotStatus(slot)`, ambos `StateFlow<SlotStatus>`, delegan en `HeartRateHub` / `CadenceHub`.
+    Observar `SlotStatus` **no** arranca los hubs (solo cuentan los observadores de `observeHeartRate*` /
+    `observeCadence*`): cada pantalla mantiene sus observadores de esos flujos.
+  - `ui/components/SensorSlotBadge.kt`: `ProtocolBadge` (sale de `WorkoutScreen`, ANT+ verde / BLE azul),
+    `SensorSlotBadge` (hueco + señal + batería) y `rememberSensorSlots()` con `SensorSlotsViewModel` (Hilt, solo
+    lee los 4 `SlotStatus`: HR1, HR2, C1, C2).
+  - Tabata: el número en vivo sigue viniendo del servicio (lo que se graba); señal, batería y estado del punto
+    salen de `SlotStatus`. Punto: verde con señal, naranja buscando (hueco libre), rojo aparato del hueco sin
+    señal. La barra superior deja sitio a la flecha de volver (antes tapaba HR1).
+  - Config: rejilla 2×2 (HR1 HR2 / C1 C2) con valor, señal y batería; 0 rpm conectado se muestra como 0.
+    `ConfigViewModel` añade `slots`; conserva sus observadores y `BleScanStatus` (Home lo usa hasta T-06).
+  - `WorkoutService` no se toca en T-04.
 - Ruta: `FreeRideStats` con HR1/HR2 y C1/C2 separados; medias HR1/HR2 separadas; escucha C2.
 
 ## Archivos
 - Nuevos: `sensor/SensorDeviceRegistry.kt`, `sensor/PairingPolicy.kt`, `sensor/DualSlotAllocator.kt`,
   `sensor/CadenceHub.kt`, `sensor/AntRadio.kt`, `sensor/CscParser.kt`, `ui/components/SensorSlotBadge.kt`, `ui/components/SensorBar.kt`,
-  `ui/devices/DevicesSheet.kt` (+ ViewModel),
+  `ui/devices/DevicesSheet.kt` (+ ViewModel), `SensorSlotsViewModel` (dentro de `SensorSlotBadge.kt`),
   tests en `app/src/test/.../sensor/`.
 - Modificados: `sensor/HeartRateHub.kt`, `sensor/SensorManager.kt`, `service/FreeRideService.kt`,
   `ui/freeride/FreeRideScreen.kt`, `ui/home/HomeScreen.kt`, `ui/workout/WorkoutScreen.kt`,
-  `ui/config/ConfigViewModel.kt`.
+  `ui/config/ConfigViewModel.kt`, `ui/config/ConfigScreen.kt`.
 - Borrados: `sensor/HrDeviceRegistry.kt` (sustituido), `sensor/BleManagers.kt`.
 - Sin cambios: Room, Gradle, `NavGraph.kt`, ciclo de vida de los servicios.
 
