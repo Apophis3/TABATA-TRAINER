@@ -46,10 +46,16 @@ usuario confirme la anterior con evidencia. El agente **no** ejecuta Gradle ni `
   de pasos bajo el indicador de páginas. (El "lápiz" de Config no es un fallo: es el S Pen del usuario; no se toca.)
   *Prueba 1.6.123: suite 202/202 verde; corte BLE "sin contacto" visto en Logcat. Falta: parte ANT+ (no conectó,
   ADAPTER_NOT_DETECTED) y capturas de Ruta horizontal/vertical.*
-- [ ] Ruta: un pulsómetro → tarjeta grande; pasos/min en la vuelta *(pedido por el usuario 2026-11-21; formalizar
-  en `spec.md`/`plan.md` antes del código)*: en la página 1, con un solo pulsómetro con señal, una sola tarjeta de
-  pulso con el número lo más grande posible (con dos, HR1 | HR2); en la página 3, casilla de pasos/min en la
-  vuelta en curso.
+- [ ] Ruta: un pulsómetro → tarjeta grande; cadencia o pasos/min en la vuelta *(pedido por el usuario
+  2026-11-21; `spec.md` R7.1–R7.2, `plan.md` §9)*: en la página 1, con un solo pulsómetro con señal, una sola
+  tarjeta de pulso con el número lo más grande posible (con dos, HR1 | HR2); en la página 3, la misma casilla
+  muestra "Cadencia" (rpm) con cadenciómetro y "Pasos/min" (ppm de la vuelta) sin él.
+  *Prueba 1.6.128: suite 209/209; una y dos bandas, quitar/poner: tarjeta única ↔ partida sin parpadeo. Falta
+  página 3 y horizontal.*
+- [ ] Señal por recuadro de color *(pedido por el usuario 2026-11-21; `spec.md` R6.1, `plan.md` §10)*: el hueco
+  (HR1/HR2/C1/C2) dentro de un recuadro verde (ANT+) o azul (BLE) en lugar del texto "ANT+"/"BLE".
+  *Prueba 1.6.130: captura de Config con HR1/HR2 en recuadro verde (ANT+); Logcat: HR1 pasa de BLE a ANT+ y vuelve
+  tras una caída de 3 s, sin errores. Falta: tests tras el cambio y capturas de Tabata y Ruta.*
 - [ ] T-06 **Hoja "Dispositivos" común + Home.** Estado real por hueco en Home; hoja con
   unir/separar/renombrar/hueco/olvidar/reconectar/guiado; barra de sensores común `SensorBar` que abre la hoja
   al tocarla en Home, Tabata, Ruta (también en marcha) y Config (R8.1–R8.3); la flecha sigue reconectando.

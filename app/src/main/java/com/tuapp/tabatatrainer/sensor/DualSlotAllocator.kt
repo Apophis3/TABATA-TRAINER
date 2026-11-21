@@ -23,7 +23,8 @@ data class SlotStatus(
     val protocol: String? = null,    // "ANT+" / "BLE"
     val connected: Boolean = false,
     val value: Int = 0,
-    val battery: SensorBattery? = null
+    val battery: SensorBattery? = null,
+    val fresh: Boolean = false       // la fuente tiene dato reciente (no basta "conectado"; spec 007 R7.1)
 )
 
 /**
@@ -213,7 +214,8 @@ class DualSlotAllocator(
             value = best?.value ?: 0,
             // ANT+ HR no da batería (SDK 3.9): se usa la de la otra señal del mismo aparato (spec 005, T-03),
             // solo si esa señal sigue conectada. Sin fuente no hay batería (Home la usa como "conectado").
-            battery = best?.let { b -> b.battery ?: members.firstNotNullOfOrNull { m -> m.battery.takeIf { m.connected } } }
+            battery = best?.let { b -> b.battery ?: members.firstNotNullOfOrNull { m -> m.battery.takeIf { m.connected } } },
+            fresh = best?.fresh == true
         )
     }
 

@@ -6,6 +6,59 @@ memoria privada de Claude. **Lo más reciente arriba.**
 
 ---
 
+## 2026-11-21 — Spec 007 · Ruta: un pulsómetro → tarjeta grande; cadencia o pasos/min (pendiente de prueba)
+
+### Contexto
+Peticiones del usuario antes de T-06 (traspaso "Siguiente"). Sin compilar ni instalar.
+
+### Hecho
+- `spec.md` R7.1 (tarjeta única con un pulsómetro) y R7.2 (casilla "Cadencia" o "Pasos/min"); `plan.md` §9;
+  `tasks.md` actualizado. T-06 sin empezar.
+- Decisión del usuario (página 3): no se añade casilla; la misma casilla dice "Cadencia" (rpm) con cadenciómetro
+  y "Pasos/min" (ppm de la vuelta) sin él. El valor ya era así; cambia el título (`CurrentLapView.cadenceLabel`).
+  Los ppm salen a partir de 10 s de vuelta (sin cambios).
+- `SlotStatus.fresh` (nuevo, por defecto `false`): el hueco tiene dato reciente. Hacía falta porque
+  `connected` y `FreeRideStats.heartRate*` siguen "vivos" ≈ 14 s tras quitar una banda.
+- Nuevo `util/laps/HeartRateCardPolicy` (+ test, 5): única con un solo hueco fresco, partida con dos; sin ninguno
+  se queda como estaba; de única a partida espera 8 s (un dato suelto no la parte), el resto 2 s.
+- `FreeRideScreen.MetricsGrid` (vertical y horizontal): `SingleSlotCard` con el número hasta 96 sp y hueco +
+  señal + batería en una línea. Log `FreeRideScreen: Ruta: tarjeta de pulso única HR1/HR2 / partida HR1 | HR2`.
+- Tests: +1 `DualSlotAllocatorTest`, +5 `HeartRateCardPolicyTest`, +1 `CurrentLapModelTest` → suite esperada 209.
+- Sin tocar Room, Gradle, `NavGraph.kt` ni el ciclo de vida de los servicios.
+
+### Prueba del usuario (1.6.128, instalada 16:17:11)
+- Tests (16:16): 209/209 verdes (`HeartRateCardPolicyTest` 5/5, `CurrentLapModelTest` 10/10,
+  `DualSlotAllocatorTest` 12/12).
+- Una banda (xoss, ANT+): HR1 asignado 16:17:26.1 → `Ruta: tarjeta de pulso única HR1` 16:17:29.7. Captura:
+  tarjeta única "88 bpm" con HR1 + ANT+. Sin cierres de la app.
+- Visto: al arrancar, `Registro: 0 aparatos` (sin aparatos guardados).
+- Dos bandas (xoss HR1 + Decathlon 8298 HR2, ANT+): HR2 asignado 16:19:04.4 → partida 16:19:12.4 (espera 8 s).
+  Quitada la Decathlon: BLE "sin contacto" 16:19:58.7, ANT+ "sin latidos nuevos" 16:20:01.0 → única HR1
+  16:20:07.1. Puesta otra vez: ANT+ "latidos de nuevo" 16:20:25.6 → partida 16:20:35.3. Un cambio por paso, sin
+  parpadeo (HR2 pasó un momento por su BLE al reconectarse y la tarjeta no se movió). Capturas: partida HR1 | HR2
+  con ANT+ y batería, parada y en ruta.
+- Con esto queda vista también la parte ANT+ de los arreglos menores (§8, "sin latidos nuevos").
+- Falta: página 3 ("Pasos/min" / "Cadencia") y horizontal (incluida la página 1 con pasos de §8).
+- Propuesta nueva del usuario (16:2x): quitar el texto ANT+/BLE y marcar la señal con un recuadro de color
+  alrededor de HR1/HR2/C1/C2 (verde ANT+, azul BLE). Aprobada y hecha (ver abajo).
+
+### Señal por recuadro de color (pendiente de prueba)
+- `spec.md` R6.1, `plan.md` §10, línea nueva en `tasks.md`.
+- Solo `ui/components/SensorSlotBadge.kt`: el nombre del hueco va dentro de un recuadro (borde 1,5 dp + fondo
+  al 15 %) verde ANT+ / azul BLE; sin señal, borde transparente con el mismo hueco (no salta al conectar). Fuera
+  la etiqueta de texto "ANT+"/"BLE" (`ProtocolBadge` borrado, no tenía más usos; queda `protocolColor()`).
+  Lector de pantalla: "HR1, ANT+" / "HR1, sin señal". Batería igual.
+- Afecta a la vez a Tabata, Config y Ruta (barra y tarjetas) sin cambiar sus llamadas; Home lo heredará en T-06.
+- Prueba 1.6.130 (16:28): Config bien (HR1/HR2 en recuadro verde, ANT+). Logcat sin errores; HR1 BLE → ANT+ a
+  los 15 s, caída breve a BLE a las 16:29:02 y vuelta a ANT+ a los 3 s. Los tests no se han vuelto a pasar tras el
+  cambio (últimos: 209/209 de las 16:16). Falta: tests y capturas de Tabata y Ruta.
+
+### Traspaso
+- `traspaso.md` reescrito: "Siguiente" = cerrar con evidencia los tres arreglos previos (§8, §9, §10) y luego
+  T-06 cuando el usuario lo diga. Sin commit (el usuario no lo ha pedido).
+
+---
+
 ## 2026-11-21 — Spec 007 · Arreglos menores antes de T-06 (validados en parte)
 
 ### Contexto

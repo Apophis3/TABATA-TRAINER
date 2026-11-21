@@ -18,6 +18,12 @@ class CurrentLapModelTest {
     ) = CurrentLapModel.of(seconds, meters, steps, elevation, cadenceActive, rpm, Locale.US)
 
     @Test
+    fun cell_title_is_steps_per_minute_without_bike_sensor_and_cadence_with_it() {
+        assertEquals("Pasos/min", view().cadenceLabel)
+        assertEquals("Cadencia", view(cadenceActive = true, rpm = 87f).cadenceLabel)
+    }
+
+    @Test
     fun running_lap_shows_pace_steps_ppm_and_elevation() {
         val v = view()
         assertEquals("5:30", v.pace)

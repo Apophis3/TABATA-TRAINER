@@ -599,7 +599,7 @@ private fun CompactSensorRowWithGps(
 }
 
 /**
- * Un hueco (HR1/HR2/C1/C2) en Config (spec 007, T-04): valor + hueco + señal (ANT+ verde / BLE azul) + batería.
+ * Un hueco (HR1/HR2/C1/C2) en Config (spec 007, T-04): valor + hueco en recuadro de señal (ANT+ verde / BLE azul, R6.1) + batería.
  * Color del valor: verde con señal, naranja buscando (hueco libre), rojo si el aparato del hueco perdió la señal.
  * En cadencia 0 rpm con señal es un dato válido y se muestra "0".
  */

@@ -66,6 +66,8 @@ import com.tuapp.tabatatrainer.ui.theme.TabataColors
 import com.tuapp.tabatatrainer.ui.theme.TabataSizes
 import com.tuapp.tabatatrainer.util.laps.CadenceDisplayPolicy
 import com.tuapp.tabatatrainer.util.laps.CurrentLapModel
+import com.tuapp.tabatatrainer.util.laps.HeartRateCardLayout
+import com.tuapp.tabatatrainer.util.laps.HeartRateCardPolicy
 import com.tuapp.tabatatrainer.util.laps.KmAlert
 import com.tuapp.tabatatrainer.util.laps.LastManualLap
 import com.tuapp.tabatatrainer.util.map.MapFollowPolicy
@@ -334,6 +336,8 @@ private fun MetricsPage(
  */
 @Composable
 private fun MetricsGrid(stats: FreeRideStats, modifier: Modifier, cardPadding: Dp = 16.dp) {
+    val slots = rememberSensorSlots()
+    val hrLayout = rememberHeartRateCardLayout(slots)
     BoxWithConstraints(modifier) {
         val density = LocalDensity.current
         val rowHeight = (maxHeight - 12.dp) / 2
@@ -344,7 +348,10 @@ private fun MetricsGrid(stats: FreeRideStats, modifier: Modifier, cardPadding: D
         // Fila de pulso y cadencia: cada mitad lleva debajo hueco + señal + batería (~18 dp más)
         val splitFontSize = with(density) { ((valueLine - 18.dp) / 1.3f).toSp() }
             .value.coerceIn(24f, 55f).sp
-        val slots = rememberSensorSlots()
+        // Tarjeta de pulso única (R7.1): la insignia va en una línea en lugar de la etiqueta y el número usa todo
+        // el alto, sin el tope de 55 sp; el ancho lo ajusta el autoajuste del texto
+        val singleFontSize = with(density) { (valueLine / 1.3f).toSp() }
+            .value.coerceIn(28f, 96f).sp
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 LapMetricCardNoIcon(
@@ -369,11 +376,66 @@ private fun MetricsGrid(stats: FreeRideStats, modifier: Modifier, cardPadding: D
                 Modifier.fillMaxWidth().height(rowHeight),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                HeartRateSplitCard(stats, slots, Modifier.weight(1f).fillMaxHeight(), splitFontSize, cardPadding)
+                val hrModifier = Modifier.weight(1f).fillMaxHeight()
+                when (hrLayout) {
+                    HeartRateCardLayout.SPLIT ->
+                        HeartRateSplitCard(stats, slots, hrModifier, splitFontSize, cardPadding)
+                    HeartRateCardLayout.SINGLE_HR1 -> SingleSlotCard(
+                        half = SlotHalf(
+                            value = if (stats.heartRate > 0) "${stats.heartRate}" else "--",
+                            unit = "bpm",
+                            label = SENSOR_SLOT_LABELS[0],
+                            color = if (stats.isHrConnected) HR1_COLOR else Color.Gray,
+                            status = slots.getOrNull(0)
+                        ),
+                        valueFontSize = singleFontSize,
+                        contentPadding = cardPadding,
+                        modifier = hrModifier
+                    )
+                    HeartRateCardLayout.SINGLE_HR2 -> SingleSlotCard(
+                        half = SlotHalf(
+                            value = if (stats.heartRate2 > 0) "${stats.heartRate2}" else "--",
+                            unit = "bpm",
+                            label = SENSOR_SLOT_LABELS[1],
+                            color = if (stats.isHr2Connected) HR2_COLOR else Color.Gray,
+                            status = slots.getOrNull(1)
+                        ),
+                        valueFontSize = singleFontSize,
+                        contentPadding = cardPadding,
+                        modifier = hrModifier
+                    )
+                }
                 CadencePaceCard(stats, slots, Modifier.weight(1f).fillMaxHeight(), splitFontSize, cardPadding)
             }
         }
     }
+}
+
+/**
+ * Disposición de la tarjeta de pulso (spec 007, R7.1, plan §9): única con un solo hueco con dato reciente,
+ * partida con los dos. Arranca en la deseada (sin espera al girar o volver a la página) y cada cambio debe
+ * mantenerse [HeartRateCardPolicy.holdMs] para que un hueco que va y viene no la haga parpadear.
+ */
+@Composable
+private fun rememberHeartRateCardLayout(slots: List<SlotStatus>): HeartRateCardLayout {
+    val hr1Fresh = slots.getOrNull(0)?.fresh == true
+    val hr2Fresh = slots.getOrNull(1)?.fresh == true
+    var layout by remember { mutableStateOf(HeartRateCardPolicy.desired(hr1Fresh, hr2Fresh, HeartRateCardLayout.SPLIT)) }
+    val desired = HeartRateCardPolicy.desired(hr1Fresh, hr2Fresh, layout)
+    LaunchedEffect(desired) {
+        if (desired == layout) return@LaunchedEffect
+        delay(HeartRateCardPolicy.holdMs(layout, desired))
+        layout = desired
+        Log.i(
+            "FreeRideScreen",
+            when (desired) {
+                HeartRateCardLayout.SPLIT -> "Ruta: tarjeta de pulso partida HR1 | HR2"
+                HeartRateCardLayout.SINGLE_HR1 -> "Ruta: tarjeta de pulso única HR1"
+                HeartRateCardLayout.SINGLE_HR2 -> "Ruta: tarjeta de pulso única HR2"
+            }
+        )
+    }
+    return layout
 }
 
 // ============================================================================
@@ -711,7 +773,8 @@ private data class LapStat(val value: String, val unit: String, val label: Strin
 
 /**
  * Datos de la vuelta manual en curso, en el orden de lectura: tiempo, distancia, ritmo, velocidad, HR1, HR2, pasos,
- * cadencia, desnivel+. La cadencia es C1 y, si C1 no emite, C2 (spec 007, T-05).
+ * cadencia o pasos/min, desnivel+. Con cadenciómetro, "Cadencia" en rpm (C1 y, si C1 no emite, C2; spec 007,
+ * T-05); sin él, "Pasos/min" de la vuelta (R7.2). Nunca las dos a la vez.
  */
 private fun currentLapStats(stats: FreeRideStats): List<LapStat> {
     val lap = CurrentLapModel.of(
@@ -736,7 +799,7 @@ private fun currentLapStats(stats: FreeRideStats): List<LapStat> {
             if (stats.isHr2Connected) HR2_COLOR else Color.Gray
         ),
         LapStat(lap.steps, "", "Pasos"),
-        LapStat(lap.cadenceValue, lap.cadenceUnit, "Cadencia"),
+        LapStat(lap.cadenceValue, lap.cadenceUnit, lap.cadenceLabel),
         LapStat(lap.elevation, "m", "Desnivel +")
     )
 }
@@ -993,6 +1056,66 @@ private fun SplitMetricHalf(half: SlotHalf, valueFontSize: TextUnit, modifier: M
             fontSize = 11.sp,
             stacked = true
         )
+    }
+}
+
+/**
+ * Tarjeta de un solo hueco a tamaño completo (R7.1): mismo estilo que [LapMetricCardNoIcon], con hueco + señal +
+ * batería en una línea (R6) en lugar de la etiqueta.
+ */
+@Composable
+private fun SingleSlotCard(
+    half: SlotHalf,
+    valueFontSize: TextUnit,
+    contentPadding: Dp,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.3f)),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(contentPadding),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.Bottom
+            ) {
+                BasicText(
+                    text = half.value,
+                    style = TextStyle(fontWeight = FontWeight.Bold, color = half.color),
+                    maxLines = 1,
+                    softWrap = false,
+                    autoSize = TextAutoSize.StepBased(
+                        minFontSize = 16.sp,
+                        maxFontSize = valueFontSize,
+                        stepSize = 1.sp
+                    ),
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                Text(
+                    " ${half.unit}",
+                    fontSize = 14.sp,
+                    color = Color.White.copy(alpha = 0.6f),
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.padding(bottom = 6.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            SensorSlotBadge(
+                label = half.label,
+                status = half.status,
+                labelColor = Color.White.copy(alpha = 0.5f),
+                fontSize = 11.sp
+            )
+        }
     }
 }
 
@@ -1281,7 +1404,7 @@ private fun StatusLabel(stats: FreeRideStats, fontSize: Int = 16) {
 
 @Composable
 private fun FreeRideSensorBar(stats: FreeRideStats, onReconnect: () -> Unit) {
-    // GPS y los 4 huecos (HR1, HR2, C1, C2), cada uno con su señal ANT+/BLE y su batería (spec 007, T-05)
+    // GPS y los 4 huecos (HR1, HR2, C1, C2), cada uno en su recuadro de señal (ANT+ verde / BLE azul, R6.1) y su batería (spec 007)
     val slots = rememberSensorSlots()
     Row(
         modifier = Modifier

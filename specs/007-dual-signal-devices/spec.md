@@ -35,8 +35,19 @@ quedan fallos:
   (incluido 0 rpm parado). Radio ANT+ compartida con el pulso sin pisarse; un único escaneo BLE continuo.
 - **R6 — Hueco y señal visibles.** En toda pantalla con pulso o cadencia (Tabata, Ruta Libre, Home, Config) se
   ve qué hueco es (HR1/HR2, C1/C2) y por qué señal llega (ANT+ verde / BLE azul), con su batería.
+  - **R6.1 — Señal por recuadro de color** *(petición del usuario 2026-11-21)*: la señal ya no se escribe
+    ("ANT+"/"BLE"); el nombre del hueco va dentro de un recuadro verde si llega por ANT+ y azul si llega por BLE.
+    Sin señal, sin recuadro. Ahorra ancho en barras y tarjetas. Igual en todas las pantallas.
 - **R7 — Ruta Libre separada.** HR1/HR2 y C1/C2 por separado, como en Tabata; medias de HR1 y HR2 separadas.
   C2 en Ruta solo en vivo (guardarlo exige cambiar Room → otra spec).
+  - **R7.1 — Un pulsómetro, tarjeta grande** *(petición del usuario 2026-11-21)*: en la página 1 de Ruta
+    (vertical y horizontal), si solo **un** hueco de pulso tiene señal (dato reciente, no basta "conectado"),
+    una sola tarjeta con ese pulso lo más grande posible, con su hueco (HR1 o HR2), señal y batería (R6). Con
+    los dos con señal, la tarjeta partida HR1 | HR2 como hasta ahora. Sin ninguno con señal, se queda como
+    estaba. Sin parpadeo: un dato suelto de una banda quitada no vuelve a partir la tarjeta.
+  - **R7.2 — Cadencia o pasos/min en la vuelta en curso** *(decisión del usuario 2026-11-21)*: en la página 3,
+    la misma casilla muestra la cadencia de bici (rpm, título "Cadencia") si un cadenciómetro emite y, si no,
+    los pasos/min de la vuelta (ppm, título "Pasos/min"). Nunca las dos a la vez; siguen 9 casillas.
 - **R8 — Gestión manual.** Hoja "Dispositivos": ver señales visibles y aparatos guardados; unir, separar,
   renombrar, asignar hueco, olvidar; modo guiado "enciende solo un aparato".
   - **R8.1 — Misma entrada en todas las pantallas** *(decisión del usuario 2026-11-21 tras probar T-01)*: la
@@ -52,7 +63,7 @@ quedan fallos:
 ## Restricciones
 - Sin cambios en Room, Gradle ni `NavGraph.kt`. Sin cambiar el ciclo de vida de `WorkoutService` /
   `FreeRideService`. El contrato de `SensorManager` se conserva (`observeHeartRate*`, `observeCadence*`,
-  baterías) y solo se amplía.
+  baterías) y solo se amplía (R7.1 añade `SlotStatus.fresh`: el hueco tiene dato reciente).
 - Registro de aparatos en SharedPreferences; migra los vínculos de la spec 003 sin perderlos.
 
 ## Fuera de alcance

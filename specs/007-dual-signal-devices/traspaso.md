@@ -1,63 +1,45 @@
 # Traspaso — Spec 007 (aparatos de doble señal ANT+ ↔ BLE)
 
-Documento para continuar en un hilo nuevo. Pegar en el hilo nuevo:
+Documento para continuar en un hilo nuevo (texto de arranque: el que da el agente en el chat).
 
-> Lee AGENTS.md, docs/constitution.md, specs/007-dual-signal-devices/{spec.md, plan.md, tasks.md, traspaso.md}
-> y la primera entrada de 00_estado_proyecto_y_memoria.md. Seguimos con la spec 007 en la rama
-> `spec-007-dual-signal-devices` (T-01…T-05 validadas; arreglos menores de §8 validados en parte con la 1.6.123).
-> Antes de T-06 haz mis dos peticiones de Ruta Libre de la sección "Siguiente" de `traspaso.md`: (1) página 1,
-> con un solo pulsómetro con señal, una sola tarjeta de pulso con el número lo más grande posible (con dos,
-> HR1 | HR2 como ahora); (2) página 3, casilla de pasos/min en la vuelta en curso. Formalízalas primero en
-> `spec.md` y `plan.md`. Luego seguiremos con T-06 (hoja "Dispositivos" + Home + `SensorBar`). Valida con mis
-> pruebas (lee tú los resultados de tests y el Logcat del móvil). No compiles ni instales (lo hago yo).
-
-## Siguiente (peticiones del usuario 2026-11-21, antes de T-06)
-Comportamiento nuevo de pantalla: anotarlo en `spec.md` (requisito nuevo) y `plan.md` (§9) antes del código.
-Solo `FreeRideScreen.kt` (+ quizá `CurrentLapModel`); sin Room, sin servicios, sin `NavGraph.kt`.
-1. **Ruta página 1 — un pulsómetro, tarjeta grande.** Hoy `MetricsGrid` (`ui/freeride/FreeRideScreen.kt`
-   l. 336) pone siempre `HeartRateSplitCard` (l. 844) con HR1 | HR2. Pedido: si solo **un** hueco HR tiene señal
-   (caso típico: se puso dos bandas y se quitó una), una sola tarjeta con ese pulso a tamaño completo, como
-   Velocidad/Distancia (`LapMetricCardNoIcon`), con su etiqueta HR1 o HR2. Con dos con señal, HR1 | HR2 como
-   ahora. Ojo: el hueco quitado sigue "Conectado" un rato sin datos (Logcat 1.6.123: HR2 "Conectado" 14 s tras
-   "sin contacto" hasta que la banda se desconecta) → decidir por **señal fresca/valor > 0**, no por "conectado".
-   Evitar parpadeo (un hueco que va y viene no debe cambiar la tarjeta cada segundo: p. ej. usar la frescura de
-   5 s de `SlotStatus`). Igual en horizontal. Test de la regla de elección si se saca a una función pura.
-2. **Ruta página 3 — pasos/min en la vuelta en curso.** `currentLapStats` (l. 716) da 9 casillas (3×3): Tiempo,
-   Distancia, Ritmo, Velocidad, HR1, HR2, Pasos, Cadencia, Desnivel+. La casilla "Cadencia" ya muestra ppm de la
-   vuelta, pero **solo si ningún cadenciómetro emite** y tras 10 s de vuelta (`CurrentLapModel` l. 51–60, RF-7.5
-   "nunca se mezclan"); con cadenciómetro muestra rpm. El usuario quiere ver siempre los pasos/min, separados de
-   la cadencia de bici ("creo que hay hueco para otro cuadradito"). Proponer: casilla propia "Pasos/min" (ppm de
-   la vuelta) y "Cadencia" solo rpm de bici; ver cómo cabe una 10.ª casilla (o qué se agrupa) en vertical y en
-   horizontal (3×3 hoy). En la página 3 le da igual que se vean los dos pulsos (HR1 y HR2 se quedan).
-3. **Validación pendiente de los arreglos menores (§8):** parte ANT+ ("sin latidos nuevos", cuando ANT+ conecte)
-   y capturas de Ruta página 1 en horizontal con pasos y en vertical (regresión de `MetricsGrid`). Después,
-   marcar "Arreglos menores" `[x]` en `tasks.md` si el usuario lo confirma.
+## Siguiente (2026-11-21, tras la 1.6.130)
+1. **Cerrar lo pendiente antes de T-06** (código hecho, falta evidencia del usuario). Cuando el usuario compile,
+   instale y pruebe: leer tests (`app/build/test-results/testDebugUnitTest/*.xml`, esperado 209/209) y Logcat;
+   capturas con `adb exec-out screencap -p`. Si confirma, marcar `[x]` en `tasks.md`:
+   - **Arreglos menores (§8):** ANT+ ya validado en la 1.6.128; faltan capturas de Ruta horizontal (franja de
+     pasos bajo el indicador) y vertical.
+   - **Ruta un pulsómetro / cadencia o pasos/min (R7.1–R7.2, §9):** tarjeta única ↔ partida validada en la 1.6.128
+     (log `FreeRideScreen: Ruta: tarjeta de pulso única/partida`). Falta: página 3 dice "Pasos/min" sin
+     cadenciómetro (sale a los 10 s de vuelta) y páginas 1 y 3 en horizontal.
+   - **Señal por recuadro de color (R6.1, §10):** Config validado en la 1.6.130 (HR1/HR2 en recuadro verde).
+     Falta: tests tras el cambio y capturas de Tabata y Ruta (barra y tarjetas), con ANT+ y, si se puede, BLE.
+     Detalle visto: en la barra de Ruta el texto del hueco con señal ya es verde (`slotSignalColor`); con BLE
+     queda texto verde en recuadro azul. Si al usuario no le gusta, poner el texto en blanco (solo
+     `FreeRideSensorBar`).
+2. **Después, T-06** (hoja "Dispositivos" + Home + `SensorBar`), solo cuando el usuario lo diga. Punto de partida
+   abajo.
 
 ## Objetivo de la spec
 - Un aparato físico (pulsómetro o cadenciómetro, emite por ANT+ y BLE) = un hueco fijo (HR1/HR2, C1/C2).
 - ANT+ siempre preferente; BLE solo de respaldo, sin cambiar de hueco.
 - Funciona con dos bandas a la vez.
-- En todas las pantallas se ve hueco + señal (ANT+ verde / BLE azul) y batería (R6). Cadencia con el mismo criterio.
+- En todas las pantallas se ve el hueco dentro de un recuadro verde (ANT+) o azul (BLE) y la batería (R6, R6.1).
+  Cadencia con el mismo criterio.
 
-## Estado (T-05 validada; arreglos menores en la 1.6.123, validados en parte)
+## Estado (T-01…T-05 validadas; tres arreglos previos a T-06 hechos, a falta de capturas)
 - **T-01 [x]** registro genérico `SensorDeviceRegistry`/`DeviceBook` + `PairingPolicy`.
 - **T-02 [x]** `DualSlotAllocator` (huecos fijos, ANT+ desplaza a BLE, cuarentena, `SlotStatus`).
-- **T-03 [x]** salvo prueba real de cadencia: `CadenceHub`, `CscParser`, `AntRadio` (una búsqueda ANT+
-  compartida; el cierre va en segundo plano y se espera con `awaitClosed()`), `SensorManager` como fachada.
-  Suite 187/187 verde con la 1.6.113; dos bandas en HR1/HR2 por ANT+.
-- **Aplazado a T-07:** cadencia real (el usuario no tiene los cadenciómetros a mano) y comprobar que HR2 se
-  apaga en Home al quitar una banda.
-- **T-04 [x]** validada 2026-11-21 con la 1.6.117 (suite 187/187; capturas de Tabata y Config con dos bandas):
-  `SensorManager.hrSlotStatus/cadenceSlotStatus`; `ui/components/SensorSlotBadge.kt` (`ProtocolBadge`,
-  `SensorSlotBadge`, `SensorSlotsViewModel` + `rememberSensorSlots()`, `SlotStatus.signalState`); Tabata con
-  señal/batería/punto desde `SlotStatus` y barra superior apartada de la flecha; Config con rejilla HR1 HR2 / C1 C2.
-  Detalle en `plan.md` §7.
-- **T-05 [x]** validada 2026-11-21 con la 1.6.120 (suite 194/194; ruta con dos bandas; BD con HR1/HR2
-  separados): `util/laps/DualSlotSamples`; `FreeRideStats` con HR2/C2; colector C2; Ruta con tarjeta HR1 | HR2,
-  C1 | C2 si hay cadencia, vuelta en curso con HR1/HR2 y barra con los 4 huecos (`SensorSlotBadge`). Pendiente
-  para T-07: probar cierre de vueltas con dos bandas, C2 y cadencia real. Detalle en `plan.md` §7 "Detalle (T-05)".
-  Siguiente: T-06 (hoja "Dispositivos" + Home + `SensorBar` común; la barra de Ruta de T-05 pasa a `SensorBar`).
-  T-07 sin empezar. Una tarea cada vez.
+- **T-03 [x]** salvo cadencia real: `CadenceHub`, `CscParser`, `AntRadio` (búsqueda ANT+ compartida),
+  `SensorManager` como fachada.
+- **T-04 [x]** hueco y señal en Tabata y Config (`ui/components/SensorSlotBadge.kt`).
+- **T-05 [x]** Ruta Libre con HR1/HR2 y C1/C2 separados (`util/laps/DualSlotSamples`, `FreeRideStats` HR2/C2).
+- **Arreglos previos a T-06:**
+  - §8 valor congelado (R2.1: `AntBeatWatch`, `BleContactWatch` en `HeartRateHub`) y Ruta horizontal.
+  - §9 R7.1: `SlotStatus.fresh`, `util/laps/HeartRateCardPolicy` (única ↔ partida, espera 8 s / 2 s),
+    `FreeRideScreen` `MetricsGrid` (l. 338), `rememberHeartRateCardLayout` (l. 420), `SingleSlotCard` (l. 1067).
+    R7.2: `CurrentLapView.cadenceLabel` ("Cadencia" / "Pasos/min").
+  - §10 R6.1: `SensorSlotBadge` con recuadro de color; `ProtocolBadge` borrado; `protocolColor()` nuevo.
+- **Aplazado a T-07:** cadencia real, C2, cierre de vueltas con dos bandas, HR2 apagado en Home al quitar banda.
 
 ## T-06 — punto de partida (hoja "Dispositivos" común + Home, R8)
 - Qué pide (`tasks.md`; `spec.md` R8, R8.1–R8.3; `plan.md` §5 y §6): hoja "Dispositivos" con señales visibles y
@@ -70,11 +52,11 @@ Solo `FreeRideScreen.kt` (+ quizá `CurrentLapModel`); sin Room, sin servicios, 
     `setSlot`, `rename`, `remember` (cada cambio se guarda y se registra en Logcat con 💓/🚴 "Registro:").
   - Señales visibles: `HeartRateHub.devices` (StateFlow, l. 82) y su equivalente en `CadenceHub`; `restart()`
     para reconectar.
-  - Hueco + señal + batería: `ui/components/SensorSlotBadge.kt` (`SensorSlotBadge`, `rememberSensorSlots()`,
-    `SlotStatus.signalState`).
+  - Hueco + señal + batería: `ui/components/SensorSlotBadge.kt` (`SensorSlotBadge` con recuadro de color,
+    `protocolColor()`, `rememberSensorSlots()`, `SlotStatus.signalState`, `SlotStatus.fresh`).
   - Barras actuales a sustituir por `SensorBar`: Home `SensorBar` privada (`ui/home/HomeScreen.kt` l. 275, usa
     `BleScanStatus` + `rememberSensorBatteries`); Tabata chips (`ui/workout/WorkoutScreen.kt` ≈ l. 852–869);
-    Ruta `FreeRideSensorBar` (`ui/freeride/FreeRideScreen.kt` l. 1292, ya con los 4 huecos de T-05); Config
+    Ruta `FreeRideSensorBar` (`ui/freeride/FreeRideScreen.kt` l. 1406, ya con los 4 huecos de T-05); Config
     (`ui/config/ConfigScreen.kt`, rejilla con `SensorSlotBadge` ≈ l. 633).
   - Nuevo: `ui/devices/DevicesSheet.kt` + `DevicesViewModel` (Hilt), `ModalBottomSheet` dentro de cada
     pantalla; `NavGraph.kt` no se toca.
@@ -83,7 +65,7 @@ Solo `FreeRideScreen.kt` (+ quizá `CurrentLapModel`); sin Room, sin servicios, 
   una banda (ANT+ sin latidos nuevos / BLE sin contacto) y franja de pasos bajo el indicador en Ruta horizontal
   (`MetricsGrid`). Prueba 1.6.123: suite 202/202; corte BLE "sin contacto" visto (HR2 dejó de usarse al segundo).
   Visto: al reconectarse sola la banda quitada pasó un valor suelto (70 bpm), porque la conexión nueva aún no
-  había visto "con contacto"; sin importancia práctica. Falta lo del punto 3 de "Siguiente".
+  había visto "con contacto"; sin importancia práctica. Falta lo del punto 1 de "Siguiente".
 - El "lápiz" que se ve en Config es el icono del S Pen del usuario: **no es un fallo y no se toca** (ni código ni
   móvil, ni se apunta como pendiente).
 
@@ -105,10 +87,10 @@ Solo `FreeRideScreen.kt` (+ quizá `CurrentLapModel`); sin Room, sin servicios, 
 
 ## Reglas que no hay que olvidar
 - El agente no ejecuta Gradle ni `adb install` (hook lo bloquea; ojo: también bloquea comandos de shell que
-  contengan el texto "gradlew"). `adb` está en
+  contengan el texto "gradlew" y a veces comandos `adb` largos encadenados: lanzar `adb` solo en su comando). `adb` está en
   `C:\Users\APO\AppData\Local\Android\Sdk\platform-tools\adb.exe` (solo lectura: `devices`, `logcat`).
-  Hay dos entradas en `adb devices` (una "offline"): usar la que diga `device`, `-s R3CTA0JHTEZ` (así el
-  2026-11-21 tras T-05) o `-s adb-R3CTA0JHTEZ-ORXOOh._adb-tls-connect._tcp`.
+  Hay dos entradas en `adb devices` (una "offline"): usar la que diga `device`, `-s adb-R3CTA0JHTEZ-ORXOOh._adb-tls-connect._tcp`
+  (el 2026-11-21 por la tarde `-s R3CTA0JHTEZ` daba "not found").
 - **La evidencia la lee el agente, no se pide en capturas:** S22+ por adb inalámbrico; tras compilar el
   usuario, los tests quedan en `app/build/test-results/testDebugUnitTest/*.xml`.
 - Lecturas guardadas por segundo (HR1/HR2/cadencia): copiar la BD con

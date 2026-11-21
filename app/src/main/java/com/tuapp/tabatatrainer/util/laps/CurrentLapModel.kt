@@ -9,7 +9,8 @@ data class CurrentLapView(
     val steps: String,           // "412" | "--"
     val cadenceValue: String,    // "171" | "--"
     val cadenceUnit: String,     // "ppm" | "rpm"
-    val elevation: String        // "8" | "--"
+    val elevation: String,       // "8" | "--"
+    val cadenceLabel: String = "Pasos/min"   // "Cadencia" con cadenciómetro | "Pasos/min" sin él (spec 007 R7.2)
 )
 
 /** Resumen de la última vuelta manual cerrada */
@@ -58,7 +59,8 @@ object CurrentLapModel {
             steps = lapSteps?.toString() ?: NO_DATA,
             cadenceValue = if (cadenceActive) String.format(locale, "%.0f", cadenceRpm) else ppm?.toString() ?: NO_DATA,
             cadenceUnit = if (cadenceActive) "rpm" else "ppm",
-            elevation = lapElevationGainM?.let { String.format(locale, "%.0f", it) } ?: NO_DATA
+            elevation = lapElevationGainM?.let { String.format(locale, "%.0f", it) } ?: NO_DATA,
+            cadenceLabel = if (cadenceActive) "Cadencia" else "Pasos/min"
         )
     }
 

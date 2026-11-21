@@ -170,6 +170,40 @@ Los tres "pendientes vistos" en T-04/T-05. No es T-06 (que sigue sin empezar).
   con la app: no se toca, ni en el código ni en el móvil, ni se vuelve a apuntar como pendiente.
 - Sin tocar Room, Gradle, `NavGraph.kt`, ciclo de vida de los servicios ni el contrato de `SensorManager`.
 
+### 9. Ruta: un pulsómetro → tarjeta grande; cadencia o pasos/min en la vuelta (R7.1, R7.2; 2026-11-21, antes de T-06)
+- **Señal de verdad (R7.1).** Ni `SlotStatus.connected` ni `FreeRideStats.heartRate*` sirven: el hueco sigue
+  "conectado" ≈ 14 s tras quitar la banda (el asignador cae a un miembro solo conectado) y el servicio deja el
+  último valor hasta "Desconectado". Se añade `SlotStatus.fresh: Boolean = false` (último campo, con valor por
+  defecto; solo se amplía el contrato) = la fuente elegida en `DualSlotAllocator.pickSource` tiene dato reciente
+  (`SignalState.fresh`: < `STALE_MS` 5 s y, por R2.1, con latidos nuevos en ANT+ / con contacto en BLE).
+  `signalState` no cambia (lo usan Tabata, Config y Home).
+- **Regla pura** `util/laps/HeartRateCardPolicy` (junto a `CadenceDisplayPolicy`; sin Android, con test):
+  `desired(hr1Fresh, hr2Fresh, current)` → `SINGLE_HR1` / `SINGLE_HR2` con uno solo con señal, `SPLIT` con los
+  dos, y `current` sin ninguno (una caída corta no cambia la tarjeta). `holdMs(from, to)`: tiempo que el
+  cambio debe mantenerse antes de aplicarse: de única a partida 8 s (> `STALE_MS`: el valor suelto de 70 bpm
+  visto en la 1.6.123 al reconectarse la banda quitada no parte la tarjeta); el resto 2 s (la frescura ya
+  tarda 5 s en caer).
+- **Pantalla.** `MetricsGrid` (vertical y horizontal) guarda la disposición en un estado que arranca en la
+  deseada (sin espera al girar o al volver a la página) y la cambia con `LaunchedEffect(desired)` tras
+  `holdMs`. Log solo al cambiar: `Ruta: tarjeta de pulso única HR1/HR2` / `Ruta: tarjeta de pulso partida HR1 | HR2`.
+  La tarjeta única (`SingleSlotCard`) ocupa el sitio de la partida: número con el valor del servicio (el que
+  se graba) y el color del hueco; debajo `SensorSlotBadge` en una línea (hueco + ANT+/BLE + batería) en lugar
+  de la etiqueta, así el número usa el mismo alto que Velocidad/Distancia y todo el ancho de la tarjeta.
+- **Vuelta en curso (R7.2).** `CurrentLapView` añade `cadenceLabel` ("Cadencia" con cadenciómetro, "Pasos/min"
+  sin él); `currentLapStats` lo usa como título de la casilla. El valor ya era rpm o ppm de la vuelta (RF-7.5;
+  ppm desde 10 s de vuelta, sin cambios). Siguen 9 casillas. Test en `CurrentLapModelTest`.
+- Sin tocar Room, Gradle, `NavGraph.kt` ni el ciclo de vida de los servicios.
+
+### 10. Señal por recuadro de color (R6.1; 2026-11-21, antes de T-06)
+- Solo `ui/components/SensorSlotBadge.kt`, que usan todas las pantallas (Tabata, Config, barra y tarjetas de
+  Ruta; Home lo heredará en T-06 con `SensorBar`). Ninguna pantalla cambia su llamada.
+- `SensorSlotBadge`: el texto del hueco va dentro de un recuadro redondeado (borde 1,5 dp + fondo del mismo color
+  al 15 %): verde `0xFF66BB6A` ANT+, azul `0xFF42A5F5` BLE (los colores que ya tenía la etiqueta). Sin señal, el
+  borde es transparente con el mismo relleno, para que nada salte de sitio al conectar. Se quita la etiqueta de
+  texto "ANT+"/"BLE" (`ProtocolBadge`, sin otros usos). Batería sin cambios (al lado o debajo con `stacked`).
+- Lectores de pantalla: descripción "HR1, ANT+" / "HR1, BLE" / "HR1, sin señal".
+- Sin tocar lógica, sensores, servicios, Room, Gradle ni `NavGraph.kt`.
+
 ## Archivos
 - Nuevos: `sensor/SensorDeviceRegistry.kt`, `sensor/PairingPolicy.kt`, `sensor/DualSlotAllocator.kt`,
   `sensor/CadenceHub.kt`, `sensor/AntRadio.kt`, `sensor/CscParser.kt`, `ui/components/SensorSlotBadge.kt`, `ui/components/SensorBar.kt`,

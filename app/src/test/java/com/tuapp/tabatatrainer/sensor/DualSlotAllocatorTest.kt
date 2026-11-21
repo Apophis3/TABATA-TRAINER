@@ -51,6 +51,19 @@ class DualSlotAllocatorTest {
     }
 
     @Test
+    fun `hueco conectado sin dato reciente no es fresco (R7_1)`() {
+        book.link(HR, "ANT:1", "BLE:1", "Banda", manual = false)
+        var st = step(ant("1"), ble("1"))
+        assertEquals(true, st[0].fresh)
+        assertEquals(true, st[0].connected)
+        // Banda quitada: sigue conectada un rato pero sin datos nuevos en ninguna señal
+        st = step(ant("1", fresh = false), ble("1", fresh = false))
+        assertEquals(true, st[0].connected)
+        assertEquals(false, st[0].fresh)
+        assertEquals(false, st[1].fresh)
+    }
+
+    @Test
     fun `ANT desconocida espera y al agruparse en la sesion se une al hueco del BLE`() {
         assertEquals("BLE:1", step(ble("1"))[0].sourceId)
         var st = step(ble("1"), ant("1"), seconds = 10)
