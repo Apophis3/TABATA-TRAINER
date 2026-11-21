@@ -107,6 +107,10 @@ class CadenceHub @Inject constructor(
 
     fun slotStatus(slot: Int): StateFlow<SlotStatus> = slotStatuses[slot].asStateFlow()
 
+    // Señales vistas con su aparato y su hueco, para la hoja "Dispositivos" (spec 007, T-06). Vacío con las radios paradas
+    private val _signals = MutableStateFlow<List<VisibleSignal>>(emptyList())
+    val signals: StateFlow<List<VisibleSignal>> = _signals.asStateFlow()
+
     init {
         scope.launch {
             combine(slotFlows.map { it.subscriptionCount }) { counts -> counts.sum() }
@@ -160,6 +164,7 @@ class CadenceHub @Inject constructor(
         slotBatteries.forEach { it.value = null }
         slotStatuses.forEachIndexed { i, s -> s.value = SlotStatus(i, deviceKey = allocator.groupIn(i)) }
         slotFlows.forEach { it.resetReplayCache() }
+        _signals.value = emptyList()
     }
 
     /** Olvida el reparto de huecos y los vínculos de sesión (solo con las radios paradas) */
@@ -169,6 +174,17 @@ class CadenceHub @Inject constructor(
         allocator.clear()
         slotStatuses.forEachIndexed { i, s -> s.value = SlotStatus(i) }
         Timber.d("🚴 CadenceHub: huecos olvidados")
+    }
+
+    /**
+     * "No son el mismo aparato" (hoja "Dispositivos"): deshace un agrupado solo de sesión y bloquea la pareja para que
+     * ni el emparejado ni el relevo la vuelvan a juntar. Se aplica en el siguiente tick.
+     */
+    @Synchronized
+    fun unlinkSession(antId: String, bleId: String) {
+        registry.block(KIND, antId, bleId)
+        allocator.leaveSession(antId, bleId)
+        Timber.d("🚴 $antId y $bleId separados en la sesión")
     }
 
     /** Fuerza una reconexión completa (botón "reconectar") */
@@ -226,7 +242,9 @@ class CadenceHub @Inject constructor(
         val signals = devs.values.map {
             SignalState(it.id, it.name, it.protocol == "ANT+", it.connected, it.isFresh(now), it.rpm, it.battery)
         }
-        for (st in allocator.tick(signals, now)) {
+        val statuses = allocator.tick(signals, now)
+        _signals.value = allocator.describe(signals)
+        for (st in statuses) {
             val i = st.slot
             val changed = st.sourceId != slotStatuses[i].value.sourceId
             slotStatuses[i].value = st

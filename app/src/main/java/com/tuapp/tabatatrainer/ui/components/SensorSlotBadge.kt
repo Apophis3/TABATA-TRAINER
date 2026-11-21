@@ -24,6 +24,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tuapp.tabatatrainer.sensor.SensorManager
 import com.tuapp.tabatatrainer.sensor.SlotStatus
+import com.tuapp.tabatatrainer.ui.theme.TabataColors
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -43,6 +44,13 @@ val SlotStatus.signalState: SlotSignalState
         deviceKey == null -> SlotSignalState.SEARCHING
         else -> SlotSignalState.LOST
     }
+
+/** Color del texto de un hueco: verde con señal, naranja buscando, rojo con su aparato sin señal (barra común, T-06) */
+fun slotSignalColor(status: SlotStatus?): Color = when (status?.signalState) {
+    SlotSignalState.SIGNAL -> TabataColors.Connected
+    SlotSignalState.LOST -> TabataColors.RestRed
+    else -> Color(0xFFFFA500)
+}
 
 /** Estado de HR1, HR2, C1, C2 (spec 007, T-04). Mismo ViewModel en toda la pantalla (por destino de navegación) */
 @Composable

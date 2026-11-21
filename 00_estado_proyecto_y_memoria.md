@@ -6,6 +6,44 @@ memoria privada de Claude. **Lo más reciente arriba.**
 
 ---
 
+## 2026-11-21 — Spec 007 · T-06: hoja "Dispositivos" + `SensorBar` programadas (pendiente de prueba)
+- El usuario aprobó `plan.md` §11 («Aprobado, sigue»). Código hecho; sin compilar ni instalar (lo hace el usuario).
+- Sensores (solo se añade): señales vistas con su aparato y hueco (`VisibleSignal`, `signals` en los hubs),
+  "no son el mismo aparato" (`unlinkSession` + `block` en el registro). Arreglo: tras separar, el asignador ya no
+  vuelve a juntar ANT+ y BLE (ni relevo ni espera de 30 s con parejas bloqueadas).
+- Nuevo `ui/devices/` (hoja, ViewModel y lógica pura de tarjetas y modo guiado) y `ui/components/SensorBar.kt`.
+  La barra común sustituye a las de Home, Config, Tabata y Ruta; tocarla abre la hoja, la flecha reconecta.
+- Notas (`plan.md` §11.9): en Home no sale el aviso de "sesión en curso"; Tabata muestra GPS verde/gris (no
+  "buscando"); la barra compacta de Ruta en horizontal mantiene su tamaño.
+- Tests nuevos: 18 → suite esperada 227. Sin tocar Room, Gradle, `NavGraph.kt` ni el ciclo de vida de los
+  servicios. Página 3 de Ruta horizontal sin tocar (menor pendiente). Nada marcado `[x]`. Sin commit.
+- Falta: prueba del usuario con la evidencia de `plan.md` §11.8.
+- **Prueba parcial 1.6.138 (18:45–18:52):** suite **227/227**. Logcat: hoja abierta/cerrada en Home, Config,
+  Tabata y Ruta; renombrar (Decathlon → "…_SER") y hueco fijo HR1 (XOSS) guardados; tras Reconectar, "XOSS ocupa
+  su hueco guardado". Captura 18:52: HR1 y HR2 en ANT+ con batería. Sin errores ni cierres.
+- ANT+ "tarda": de 18:45 a 18:49 el lápiz USB ANT+ no estaba (`ADAPTER_NOT_DETECTED`; `USB_DEVICE_ATTACHED` a
+  las 18:49:24). Luego: xoss ANT+ entra en HR1 en ~15 s (se agrupa por valores). Decathlon ANT+ (8298) se agrupó
+  en 14 s, pero Reconectar (18:49:58) borró la agrupación de sesión; la 2.ª vez esperó los 30 s y entró por "ANT+
+  preferente" (~57 s desde Reconectar). Causa: las dos bandas en el mismo pecho dan casi el mismo pulso y la
+  comparación por valores (`PairingPolicy`) ve empate, porque también cuenta el BLE de la XOSS ya agrupado en la
+  sesión. No es de T-06. Remedio sin código: unir cada banda en la hoja (queda guardada y entra sin espera).
+- Ruido previo, no de T-06: `ConfigViewModel … Error crítico en collector` con `JobCancellationException` al salir
+  de Config (ya salía en la 1.6.137).
+- El usuario sigue la prueba mañana (orden en `traspaso.md` → "Siguiente"). Commit de T-06 hecho a petición del
+  usuario, con T-06 aún `[ ]`. Relevo de hilo: texto dado en el chat.
+
+---
+
+## 2026-11-21 — Spec 007 · T-06: plan de la hoja "Dispositivos" + `SensorBar` (aprobado)
+- Leídos AGENTS, constitución, spec/plan/tasks/traspaso y código de Home, Config, Tabata, Ruta, hubs y registro.
+- `plan.md` §11 escrito (datos para la hoja, arreglo de "separar" en el asignador, hoja, barra común, tests,
+  evidencia). `spec.md` Restricciones: T-06 amplía `SensorManager` (`hrSignals`, `cadenceSignals`, `unlinkSession`).
+- Visto en el código: tras separar, el asignador podía volver a juntar ANT+ y BLE en la sesión (relevo y espera
+  de 30 s no miran parejas bloqueadas) → arreglo propuesto en §11.2.
+- Sin código. Esperando aprobación del usuario.
+
+---
+
 ## 2026-11-21 — Spec 007 · Prueba 1.6.132 y arreglos de Ruta en horizontal (validados con la 1.6.134)
 
 ### Prueba del usuario (1.6.132, instalada 17:54:44)

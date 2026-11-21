@@ -75,6 +75,38 @@ class DualSlotAllocatorTest {
         assertNull(st[1].deviceKey)
     }
 
+    // --- Pareja separada a mano (hoja "Dispositivos", T-06) ------------------------------------------
+
+    @Test
+    fun `sin bloquear, al caer la ANT un BLE con valor parecido la releva en su hueco`() {
+        step(ant("1"))
+        val st = step(ant("1", connected = false), ble("1"))
+        assertEquals("BLE:1", st[0].sourceId)
+        assertNull(st[1].deviceKey)
+    }
+
+    @Test
+    fun `pareja separada, al caer la ANT el BLE no la releva y va a su propio hueco`() {
+        book.block(HR, "ANT:1", "BLE:1")
+        step(ant("1"))
+        val st = step(ant("1", connected = false), ble("1"))
+        assertEquals("hueco guardado a la ANT caída", "ANT:1", st[0].deviceKey)
+        assertNull(st[0].sourceId)
+        assertEquals("BLE:1", st[1].deviceKey)
+        assertEquals("BLE:1", alloc.groupOf("BLE:1"))
+    }
+
+    @Test
+    fun `pareja separada, el BLE no espera 30 s junto a su ANT`() {
+        book.block(HR, "ANT:1", "BLE:1")
+        step(ant("1"))
+        val st = step(ant("1"), ble("1"))
+        assertEquals("ANT:1", st[0].deviceKey)
+        assertEquals("sin cuarentena", "BLE:1", st[1].deviceKey)
+        // Y la marca "solo en esta sesión" no aparece en la hoja
+        assertEquals(listOf(false, false), alloc.describe(listOf(ant("1"), ble("1"))).map { it.sessionOnly })
+    }
+
     // --- Dos bandas: ANT+ desplaza a BLE -------------------------------------------------------------
 
     @Test

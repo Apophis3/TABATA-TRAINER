@@ -2,7 +2,36 @@
 
 Documento para continuar en un hilo nuevo (texto de arranque: el que da el agente en el chat).
 
-## Siguiente (2026-11-21, tras la 1.6.134)
+## Siguiente (2026-11-21, T-06 en commit; prueba parcial con la 1.6.138, el resto mañana)
+- **T-06 aprobado, programado y en commit** (`plan.md` §11; notas de lo hecho en §11.9). Probado en parte con la
+  1.6.138 (ver abajo); el usuario hace el resto de pruebas al día siguiente.
+- **Orden de prueba que falta** (se le dio al usuario):
+  1. En la hoja, "Unir con…" la XOSS y la Decathlon con su ANT+ → "Guardado" con dos señales, conserva nombre y
+     hueco; tras Reconectar vuelven a ANT+ en segundos, sin la espera de 30 s.
+  2. "Emparejar paso a paso" con una sola banda encendida (sin unir u olvidada) hasta "listo".
+  3. Separar una banda unida → ANT+ y BLE no se vuelven a juntar solas (`separados en la sesión` / bloqueo).
+  4. Olvidar un aparato → su tarjeta pasa a "No guardado".
+  5. Con Tabata o Ruta en marcha: abrir la hoja desde la barra, cambiar una banda a HR2 → aviso "sesión en curso".
+  6. Ruta en horizontal: tocar la barra compacta de las páginas 1 y 3 → se abre la hoja.
+  El usuario apunta la hora aproximada de lo raro para buscarlo en el Logcat.
+- Cuando el usuario compile, instale y pruebe: leer tests (`app/build/test-results/testDebugUnitTest/*.xml`,
+  esperado **227/227**), Logcat (`Registro:`, `ocupa su hueco guardado`, `Dispositivos: hoja abierta/cerrada`,
+  `separados en la sesión`) y capturas (`adb exec-out screencap -p`) de la barra en Home, Config, Tabata y Ruta
+  (vertical y horizontal) y de la hoja. Lista completa en `plan.md` §11.8.
+- Si algo falla al compilar: los cambios de pantalla están en `HomeScreen`, `ConfigScreen`, `WorkoutScreen`
+  (`WorkoutSensorBar`) y `FreeRideScreen` (`freeRideGps`); la hoja en `ui/devices/`.
+- **Prueba parcial 1.6.138:** 227/227; hoja abierta/cerrada en las 4 pantallas, renombrar, hueco fijo HR1,
+  Reconectar y "ocupa su hueco guardado" vistos. Falta: Ruta en horizontal, cambiar hueco con sesión en marcha,
+  Olvidar, unir/separar ANT+ en la hoja y el modo guiado hasta "listo".
+- Visto en la prueba (no es de T-06): con dos bandas en el mismo pecho la ANT+ de la 2.ª banda puede esperar 30 s,
+  porque `PairingPolicy` compara también con el BLE ya agrupado en la sesión y ve empate. Reconectar borra las
+  agrupaciones de sesión. Uniendo las bandas en la hoja no pasa. Arreglo posible (pendiente de decidir): no
+  contar en la comparación las señales ya agrupadas en la sesión.
+- Con la prueba buena y el visto bueno del usuario, marcar `[x]` T-06. T-07 solo cuando lo diga.
+- Sigue sin tocar (menor): borde de abajo de la 3.ª fila en la página 3 de Ruta en horizontal; falta probarla con
+  una vuelta cerrada.
+
+## Antes (tras la 1.6.134)
 - **Los tres arreglos previos a T-06 (§8, §9, §10) validados y marcados `[x]`** con la 1.6.134 (suite 209/209).
   Menor, no bloquea: en la página 3 de Ruta en horizontal el borde de abajo de la 3.ª fila queda recortado unos
   dp; sin probar esa página con una vuelta cerrada. Siguiente: **T-06**, solo cuando el usuario lo diga.
@@ -37,7 +66,7 @@ Documento para continuar en un hilo nuevo (texto de arranque: el que da el agent
 - En todas las pantallas se ve el hueco dentro de un recuadro verde (ANT+) o azul (BLE) y la batería (R6, R6.1).
   Cadencia con el mismo criterio.
 
-## Estado (T-01…T-05 y los tres arreglos previos a T-06 validados)
+## Estado (T-01…T-05 y los tres arreglos previos a T-06 validados; T-06 con código, sin probar)
 - **T-01 [x]** registro genérico `SensorDeviceRegistry`/`DeviceBook` + `PairingPolicy`.
 - **T-02 [x]** `DualSlotAllocator` (huecos fijos, ANT+ desplaza a BLE, cuarentena, `SlotStatus`).
 - **T-03 [x]** salvo cadencia real: `CadenceHub`, `CscParser`, `AntRadio` (búsqueda ANT+ compartida),

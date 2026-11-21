@@ -121,6 +121,15 @@ class DeviceBook(
         return true
     }
 
+    /**
+     * Bloquea una pareja ANT+ ↔ BLE para el emparejado automático sin que haya ficha emparejada que separar
+     * (agrupado solo de sesión: "no son el mismo aparato"). Un `link` manual la desbloquea. Devuelve true si cambió.
+     */
+    @Synchronized fun block(kind: SensorKind, antId: String, bleId: String): Boolean {
+        require(antId.startsWith("ANT:") && bleId.startsWith("BLE:")) { "block($antId, $bleId)" }
+        return blockedPairs.add(BlockedPair(kind, antId, bleId))
+    }
+
     /** Olvida el aparato por completo (también sus parejas bloqueadas) */
     @Synchronized fun forget(kind: SensorKind, key: String): Boolean {
         val d = find(kind, key) ?: return false
@@ -266,6 +275,9 @@ class SensorDeviceRegistry @Inject constructor(
 
     fun split(kind: SensorKind, key: String) = changed(book.split(kind, key)) { "${tag(kind)} Registro: $key separado" }
     fun forget(kind: SensorKind, key: String) = changed(book.forget(kind, key)) { "${tag(kind)} Registro: $key olvidado" }
+    fun block(kind: SensorKind, antId: String, bleId: String) = changed(book.block(kind, antId, bleId)) {
+        "${tag(kind)} Registro: $antId ↔ $bleId bloqueados (no son el mismo aparato)"
+    }
     fun setSlot(kind: SensorKind, key: String, slot: Int?) = changed(book.setSlot(kind, key, slot)) {
         "${tag(kind)} Registro: $key → hueco ${slot?.plus(1) ?: "libre"}"
     }

@@ -59,6 +59,16 @@ class SensorManager @Inject constructor(
     fun hrSlotStatus(slot: Int): StateFlow<SlotStatus> = heartRateHub.slotStatus(slot)
     fun cadenceSlotStatus(slot: Int): StateFlow<SlotStatus> = cadenceHub.slotStatus(slot)
 
+    // Hoja "Dispositivos" (spec 007, T-06): señales vistas con su aparato y su hueco (1 Hz). Solo lectura: no arranca
+    // los sensores. Y "no son el mismo aparato" para un agrupado solo de sesión (los aparatos guardados se cambian en
+    // SensorDeviceRegistry)
+    fun hrSignals(): StateFlow<List<VisibleSignal>> = heartRateHub.signals
+    fun cadenceSignals(): StateFlow<List<VisibleSignal>> = cadenceHub.signals
+    fun unlinkSession(kind: SensorKind, antId: String, bleId: String) = when (kind) {
+        SensorKind.HR -> heartRateHub.unlinkSession(antId, bleId)
+        SensorKind.CADENCE -> cadenceHub.unlinkSession(antId, bleId)
+    }
+
     /** Fuerza una reconexión completa de pulso y cadencia (botón "reconectar") */
     fun resetFlows() {
         Timber.d("🔄 SensorManager: reconexión de pulso y cadencia")

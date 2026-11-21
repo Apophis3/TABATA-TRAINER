@@ -140,6 +140,24 @@ class DeviceBookTest {
     }
 
     @Test
+    fun `no son el mismo aparato bloquea la pareja sin crear fichas, se guarda y un vinculo manual la desbloquea`() {
+        val book = DeviceBook()
+        assertTrue(book.block(HR, "ANT:1", "BLE:X"))
+        assertFalse("ya estaba bloqueada", book.block(HR, "ANT:1", "BLE:X"))
+        assertTrue(book.isBlocked(HR, "ANT:1", "BLE:X"))
+        assertFalse("pulso y cadencia van aparte", book.isBlocked(CADENCE, "ANT:1", "BLE:X"))
+        assertTrue(book.all().isEmpty())
+        assertFalse(book.link(HR, "ANT:1", "BLE:X", "Auto", manual = false))
+        // Sobrevive a guardar y cargar
+        val loaded = DeviceBook.parse(book.serialize())
+        assertTrue(loaded.isBlocked(HR, "ANT:1", "BLE:X"))
+        // Unir a mano desde la hoja la desbloquea
+        assertTrue(loaded.link(HR, "ANT:1", "BLE:X", "Mía", manual = true))
+        assertFalse(loaded.isBlocked(HR, "ANT:1", "BLE:X"))
+        assertEquals("BLE:X", loaded.partnerOf(HR, "ANT:1"))
+    }
+
+    @Test
     fun `tras separar se pueden emparejar con su pareja correcta`() {
         val book = DeviceBook()
         book.link(HR, "ANT:A", "BLE:B", "Cruzado", manual = false)   // emparejado erróneo

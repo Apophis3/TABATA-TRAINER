@@ -59,9 +59,11 @@ import com.tuapp.tabatatrainer.sensor.SlotStatus
 import com.tuapp.tabatatrainer.ui.components.BatteryLowWarnings
 import com.tuapp.tabatatrainer.ui.components.SENSOR_SLOT_LABELS
 import com.tuapp.tabatatrainer.ui.components.SensorSlotBadge
-import com.tuapp.tabatatrainer.ui.components.SlotSignalState
 import com.tuapp.tabatatrainer.ui.components.rememberSensorSlots
-import com.tuapp.tabatatrainer.ui.components.signalState
+import com.tuapp.tabatatrainer.ui.components.GpsIndicator
+import com.tuapp.tabatatrainer.ui.components.SensorBar
+import com.tuapp.tabatatrainer.ui.components.SensorBarStyle
+import com.tuapp.tabatatrainer.ui.devices.DevicesSheet
 import com.tuapp.tabatatrainer.ui.theme.TabataColors
 import com.tuapp.tabatatrainer.ui.theme.TabataSizes
 import com.tuapp.tabatatrainer.util.laps.CadenceDisplayPolicy
@@ -174,6 +176,9 @@ fun FreeRideScreen(
         }
     }
     val onReconnect: () -> Unit = { service?.reconnectSensors() }
+    // Hoja "Dispositivos" (spec 007, T-06): se abre tocando la barra de sensores
+    var showDevices by rememberSaveable { mutableStateOf(false) }
+    val onOpenDevices: () -> Unit = { showDevices = true }
 
     val backgroundGradient = Brush.verticalGradient(
         colors = listOf(TabataColors.CoolGray, Color(0xFF2D2D2D), TabataColors.CoolGray)
@@ -192,15 +197,15 @@ fun FreeRideScreen(
             when (page) {
                 PAGE_METRICS -> {
                     if (isLandscape) {
-                        LandscapeMetricsPage(stats, laps, onStart, onPause, onResume, onStop, onLap, onReconnect)
+                        LandscapeMetricsPage(stats, laps, onStart, onPause, onResume, onStop, onLap, onReconnect, onOpenDevices)
                     } else {
-                        MetricsPage(stats, onStart, onPause, onResume, onStop, onLap, onReconnect)
+                        MetricsPage(stats, onStart, onPause, onResume, onStop, onLap, onReconnect, onOpenDevices)
                     }
                 }
                 PAGE_MAP -> MapPage(stats, mapPoints, onPause, onResume)
                 PAGE_LAPS -> {
                     if (isLandscape) {
-                        LandscapeLapsPage(stats, laps, onStart, onPause, onResume, onStop, onLap)
+                        LandscapeLapsPage(stats, laps, onStart, onPause, onResume, onStop, onLap, onOpenDevices)
                     } else {
                         LapsPage(stats, laps, onLap)
                     }
@@ -266,6 +271,15 @@ fun FreeRideScreen(
             Icon(Icons.AutoMirrored.Filled.ArrowBack, "Volver", tint = Color.White)
         }
     }
+
+    if (showDevices) {
+        DevicesSheet(
+            screen = "Ruta",
+            liveSession = stats.isRunning,
+            onReconnect = onReconnect,
+            onDismiss = { showDevices = false }
+        )
+    }
 }
 
 // ============================================================================
@@ -280,7 +294,8 @@ private fun MetricsPage(
     onResume: () -> Unit,
     onStop: () -> Unit,
     onLap: () -> Unit,
-    onReconnect: () -> Unit
+    onReconnect: () -> Unit,
+    onOpenDevices: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -289,8 +304,15 @@ private fun MetricsPage(
             .padding(TabataSizes.PaddingMedium),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Barra de sensores
-        FreeRideSensorBar(stats = stats, onReconnect = onReconnect)
+        // Barra de sensores común (spec 007, T-06): tocarla abre "Dispositivos"; la flecha reconecta
+        SensorBar(
+            slots = rememberSensorSlots(),
+            gps = freeRideGps(stats),
+            style = SensorBarStyle.ROW,
+            onOpenDevices = onOpenDevices,
+            modifier = Modifier.fillMaxWidth(),
+            onReconnect = onReconnect
+        )
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -1119,32 +1141,11 @@ private fun SingleSlotCard(
     }
 }
 
-/** Color del punto o etiqueta de un hueco: verde con señal, naranja buscando, rojo con su aparato sin señal */
-private fun slotSignalColor(status: SlotStatus?): Color = when (status?.signalState) {
-    SlotSignalState.SIGNAL -> TabataColors.Connected
-    SlotSignalState.LOST -> TabataColors.RestRed
-    else -> Color(0xFFFFA500)
-}
-
-/**
- * Fila compacta para apaisado: GPS y los 4 huecos (HR1, HR2, C1, C2), cada uno en su recuadro de señal (ANT+ verde /
- * BLE azul, R6.1) como la barra vertical; sin batería por falta de ancho (plan §10)
- */
-@Composable
-private fun CompactSensorRow(stats: FreeRideStats, slots: List<SlotStatus>) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        SensorDot(Icons.Default.GpsFixed, stats.isGpsConnected, stats.isGpsScanning, TabataColors.WorkGreen)
-        SENSOR_SLOT_LABELS.forEachIndexed { i, label ->
-            val status = slots.getOrNull(i)
-            SensorSlotBadge(
-                label = label,
-                status = status,
-                labelColor = slotSignalColor(status),
-                fontSize = 10.sp,
-                showBattery = false
-            )
-        }
-    }
+/** GPS de Ruta en la barra común: con señal, buscando o apagado */
+private fun freeRideGps(stats: FreeRideStats): GpsIndicator = when {
+    stats.isGpsConnected -> GpsIndicator.FIX
+    stats.isGpsScanning -> GpsIndicator.SEARCHING
+    else -> GpsIndicator.OFF
 }
 
 @Composable
@@ -1239,7 +1240,8 @@ private fun LandscapeMetricsPage(
     onResume: () -> Unit,
     onStop: () -> Unit,
     onLap: () -> Unit,
-    onReconnect: () -> Unit
+    onReconnect: () -> Unit,
+    onOpenDevices: () -> Unit
 ) {
     val slots = rememberSensorSlots()
     Row(
@@ -1256,8 +1258,8 @@ private fun LandscapeMetricsPage(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceEvenly
         ) {
-            // Sensores compactos: GPS y un punto por hueco (HR1, HR2, C1, C2)
-            CompactSensorRow(stats, slots)
+            // Sensores compactos (barra común): GPS y los 4 huecos; tocarla abre "Dispositivos"
+            SensorBar(slots, freeRideGps(stats), SensorBarStyle.COMPACT, onOpenDevices)
 
             // Timer (MÁS GRANDE en horizontal)
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1295,7 +1297,8 @@ private fun LandscapeLapsPage(
     onPause: () -> Unit,
     onResume: () -> Unit,
     onStop: () -> Unit,
-    onLap: () -> Unit
+    onLap: () -> Unit,
+    onOpenDevices: () -> Unit
 ) {
     val lastManual = remember(laps) { CurrentLapModel.lastManual(laps) }
     val slots = rememberSensorSlots()
@@ -1325,8 +1328,8 @@ private fun LandscapeLapsPage(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                // Sensores compactos: GPS y los 4 huecos con su recuadro de señal
-                CompactSensorRow(stats, slots)
+                // Sensores compactos (barra común, mismo tamaño que antes): tocarla abre "Dispositivos"
+                SensorBar(slots, freeRideGps(stats), SensorBarStyle.COMPACT, onOpenDevices)
 
                 // Estado "EN RUTA"
                 StatusLabel(stats = stats, fontSize = 14)
@@ -1419,81 +1422,6 @@ private fun StatusLabel(stats: FreeRideStats, fontSize: Int = 16) {
         },
         letterSpacing = 2.sp
     )
-}
-
-@Composable
-private fun FreeRideSensorBar(stats: FreeRideStats, onReconnect: () -> Unit) {
-    // GPS y los 4 huecos (HR1, HR2, C1, C2), cada uno en su recuadro de señal (ANT+ verde / BLE azul, R6.1) y su batería (spec 007)
-    val slots = rememberSensorSlots()
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-            .padding(horizontal = 8.dp, vertical = 10.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        SensorChipAnimated(Icons.Default.GpsFixed, "GPS", stats.isGpsConnected, stats.isGpsScanning, TabataColors.WorkGreen)
-        SENSOR_SLOT_LABELS.forEachIndexed { i, label ->
-            val status = slots.getOrNull(i)
-            SensorSlotBadge(
-                label = label,
-                status = status,
-                labelColor = slotSignalColor(status),
-                fontSize = 11.sp,
-                stacked = true
-            )
-        }
-        IconButton(onClick = onReconnect, modifier = Modifier.size(32.dp)) {
-            Icon(Icons.Default.Refresh, "Reconectar", tint = Color.White.copy(alpha = 0.7f))
-        }
-    }
-}
-
-@Composable
-private fun SensorChipAnimated(icon: ImageVector, label: String, isConnected: Boolean, isScanning: Boolean, color: Color) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Box {
-            Icon(
-                icon,
-                contentDescription = label,
-                tint = when { isConnected -> color; isScanning -> Color.Yellow; else -> Color.Gray },
-                modifier = Modifier.size(20.dp)
-            )
-            if (isScanning) {
-                val infiniteTransition = rememberInfiniteTransition(label = "scan")
-                val alpha by infiniteTransition.animateFloat(
-                    initialValue = 0.3f, targetValue = 1f,
-                    animationSpec = infiniteRepeatable(animation = tween(500), repeatMode = RepeatMode.Reverse),
-                    label = "alpha"
-                )
-                Box(modifier = Modifier
-                    .size(20.dp)
-                    .background(Color.Yellow.copy(alpha = alpha * 0.3f), CircleShape))
-            }
-        }
-        Text(label, fontSize = 10.sp, color = when { isConnected -> color; isScanning -> Color.Yellow; else -> Color.Gray })
-    }
-}
-
-@Composable
-private fun SensorDot(icon: ImageVector, isConnected: Boolean, isScanning: Boolean, color: Color) {
-    Box(
-        modifier = Modifier
-            .size(24.dp)
-            .background(
-                when { isConnected -> color.copy(alpha = 0.3f); isScanning -> Color.Yellow.copy(alpha = 0.3f); else -> Color.Gray.copy(alpha = 0.2f) },
-                CircleShape
-            ),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = when { isConnected -> color; isScanning -> Color.Yellow; else -> Color.Gray },
-            modifier = Modifier.size(14.dp)
-        )
-    }
 }
 
 @Composable

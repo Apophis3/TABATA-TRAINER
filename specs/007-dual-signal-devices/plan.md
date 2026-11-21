@@ -221,11 +221,132 @@ Los tres "pendientes vistos" en T-04/T-05. No es T-06 (que sigue sin empezar).
   cambian).
 - Sin tocar lógica, sensores, servicios, Room, Gradle ni `NavGraph.kt`.
 
+### 11. T-06 — Hoja "Dispositivos" común + Home + `SensorBar` (R8, R8.1–R8.3) — *aprobado 2026-11-21; código hecho, pendiente de prueba*
+
+**11.1 Datos para la hoja (sensores; solo se añade)**
+- `VisibleSignal(kind, id, name, isAnt, value, connected, fresh, battery, group, slot: Int?, sessionOnly)`
+  (en `DualSlotAllocator.kt`, junto a `SignalState`). `group` = aparato al que pertenece (`allocator.groupOf`),
+  `slot` = hueco de ese aparato o null, `sessionOnly` = agrupada con otra señal solo en esta sesión (no guardado).
+- Cada hub publica `signals: StateFlow<List<VisibleSignal>>` en su `tick()` (1 Hz, mismo hilo y cerrojo que
+  el reparto; vacío con las radios paradas). Hoy `devices` no dice a qué aparato ni hueco va cada señal.
+- Hub: `unlinkSession(antId, bleId)` → `allocator.leaveSession` + bloqueo de la pareja en el registro ("No son el
+  mismo aparato" para un agrupado solo de sesión, que no tiene ficha que separar).
+- `SensorManager` (fachada, **amplía el contrato**; anotado en `spec.md` Restricciones): `hrSignals()`,
+  `cadenceSignals()`, `unlinkSession(kind, antId, bleId)`. Nada existente cambia.
+- `DeviceBook` / `SensorDeviceRegistry`: `block(kind, antId, bleId)` (bloquea una pareja sin ficha emparejada;
+  se guarda en el formato v2 que ya admite líneas `B`). Log `Registro: … bloqueados`.
+
+**11.2 Separar tiene que aguantar (arreglo en `DualSlotAllocator`)**
+- Hoy, tras separar (o bloquear), el asignador puede volver a juntarlos: `canHandoff` (relevo, regla 6) y
+  `inQuarantine` (espera de 30 s) no miran `isBlocked`. Si la ANT+ cae un momento, el BLE separado la relevaría
+  en la sesión; y mientras la ANT+ tiene hueco, ese BLE espera 30 s antes de recibir el suyo.
+- Arreglo: las dos ignoran parejas bloqueadas. Tests nuevos en `DualSlotAllocatorTest`.
+
+**11.3 Cambios desde la hoja, en vivo (R8.3)**
+- El registro ya se lee en cada tick: hueco fijo (regla 2), unir (regla 1 junta los dos huecos en uno), separar
+  (el BLE pasa a ser otro aparato y busca hueco). Ni la pantalla ni el servicio se tocan.
+- **Aviso:** cambiar el hueco con la sesión en marcha cambia, desde ese segundo, qué banda se graba como HR1/HR2
+  (y C1/C2) en la sesión. Es lo que pide R8.3; la hoja lo dice en una línea bajo el selector de hueco si hay
+  una sesión en curso.
+- Reglas de las acciones:
+  - Renombrar o fijar hueco a una señal no guardada: primero `remember` (ficha de una señal), luego la acción.
+  - "Unir con…" solo ofrece señales del otro protocolo que **no** estén ya en un aparato emparejado (un `link`
+    manual borraría sin avisar la otra mitad de la pareja anterior). Para reutilizar una, primero se separa.
+  - "Olvidar" (con confirmación): borra nombre, hueco y vínculo. El texto avisa de que, si es seguro, la app
+    puede volver a emparejarlo sola.
+  - "Separar" un aparato guardado: `split` (bloquea la pareja). Un agrupado solo de sesión: "No son el mismo
+    aparato" (`unlinkSession`) o "Guardar como un aparato" (`link` manual).
+
+**11.4 Hoja `ui/devices/DevicesSheet.kt` + `DevicesViewModel` (Hilt)**
+- `ModalBottomSheet` dentro de cada pantalla (no es destino de navegación; `NavGraph.kt` no se toca). Atrás la
+  cierra sin salir de la pantalla. Log `Dispositivos: hoja abierta/cerrada (<pantalla>)`.
+- Arriba: título "Dispositivos" y botón **Reconectar** (R8.2): recibe el **mismo** callback que la flecha de cada
+  pantalla y con su misma regla de visibilidad — Home/Config `ConfigViewModel.refreshSensors`, Tabata
+  `WorkoutService.refreshSensors` (oculto en pausa, como la flecha), Ruta `FreeRideService.reconnectSensors`.
+  La hoja nunca llama a `resetFlows` por su cuenta.
+- Dos pestañas: **Pulsómetros** / **Cadenciómetros**. En cada una:
+  - Una tarjeta por aparato (guardados del registro + señales vistas sin guardar, agrupadas por `group`): nombre;
+    hueco actual en su recuadro de señal (verde ANT+ / azul BLE, R6.1); una línea por señal ("ANT+ 12345 · 72 bpm",
+    "BLE XOSS · 71 bpm", atenuada si no es fresca); "Agrupado solo en esta sesión" si toca.
+  - Acciones por tarjeta: hueco fijo `Auto | HR1 | HR2` (o `C1 | C2`); Renombrar (diálogo); Unir con…;
+    Separar / No son el mismo / Guardar como un aparato; Olvidar.
+  - **Modo guiado** ("Emparejar un aparato"): pide dejar encendido solo ese aparato y mira las señales conectadas
+    del tipo: falta ANT+ ("Esperando ANT+…", útil cuando el receptor ANT+ no responde) / falta BLE / hay más de una
+    de algún tipo ("Apaga los demás") / ya están unidas ("Ya es «XOSS»") / listo: "¿ANT+ 12345 (72) y BLE XOSS (71)
+    son el mismo aparato?" → **Unir** (manual, nombre editable, hueco opcional). Lógica pura `GuidedPairing`.
+- El ViewModel arma las tarjetas con una función pura `buildDeviceCards(kind, saved, signals)` (testeable).
+- Mientras la hoja está abierta, el ViewModel se suscribe a `observeHeartRate()` y `observeCadence()` (solo
+  como observador; descarta los datos) para que los dos hubs sigan en marcha aunque la pantalla de debajo no los
+  observe (p. ej. Tabata sin cadencia). Al cerrarla se suelta; el hub aplica su parada de 5 s de siempre.
+
+**11.5 Barra común `ui/components/SensorBar.kt` (R8.1, R8.2)**
+- `SensorBar(slots, gps: GpsIndicator?, style, onOpenDevices, modifier, onReconnect: (() -> Unit)?, showBattery,
+  containerColor, accent)`; estilos `CARD` / `ROW` / `COMPACT`. Toda la
+  barra abre la hoja (`clickable`, descripción "Abrir dispositivos"); la flecha (si hay `onReconnect`) solo
+  reconecta. `GpsIndicator` = apagado / buscando (parpadeo, como Ruta hoy) / con señal; null = sin GPS.
+- Hueco: `SensorSlotBadge` (recuadro de señal + batería) con el color de texto de estado de Ruta
+  (`slotSignalColor`, pasa a `SensorSlotBadge.kt`): verde con señal, naranja buscando, rojo perdido. Es el que ya
+  usa Ruta y el que vio el usuario; usa `signalState` (`connected`) como hasta ahora.
+- **Números (solo estilo tarjeta):** se muestran solo si el hueco es `fresh`; si no, "--". Así no sale el valor
+  congelado ≈ 14 s tras quitar una banda (R2.1). En cadencia 0 rpm fresco = "0".
+- Estilos:
+  - **Tarjeta** (Home y Config): rejilla HR1 HR2 / C1 C2 con valor + hueco + batería; GPS a la derecha (Home);
+    flecha. En Config el interruptor de GPS sigue debajo, fuera de la barra.
+  - **Fila** (Ruta vertical: GPS + 4 huecos con batería debajo + flecha; Tabata: 4 huecos sin batería + GPS si
+    está activado + flecha según la regla actual, con el margen de la flecha de volver; Ruta horizontal, páginas
+    1 y 3: GPS + 4 huecos sin batería, sin flecha, igual que hoy).
+- Sustituye a: Home `SensorBar` privada + `SensorWithBattery`/`SensorDot` (Home deja de deducir HR2/C2 de la
+  batería: estado real por hueco); Tabata `SensorStatusChips`/`SensorChip`; Ruta `FreeRideSensorBar` y
+  `CompactSensorRow`; Config la fila de `SlotStatusChip` + flecha de `CompactSensorRowWithGps`.
+- Cambio visible: Home pasa a mostrar el valor de cada hueco (como Config). Tabata pasa de puntos a recuadros
+  (como Ruta). Las tarjetas de datos (Tabata, Ruta) no cambian.
+
+**11.6 Ciclo de vida (Clave 3)**
+- Servicios: sin cambios. La hoja solo lee flujos y escribe en el registro; las llamadas a reconectar son las
+  que ya existen. `NavGraph.kt`: sin cambios. Room, Gradle: sin cambios.
+- Back stack: la hoja vive en la pantalla; al salir de la pantalla se destruye con ella.
+
+**11.7 Tests (los lanza el usuario)**
+- `DeviceBookTest`: `block` (bloquea, se guarda y se lee; `link` manual lo desbloquea).
+- `DualSlotAllocatorTest`: separado + caída de ANT+ → el BLE no la releva; separado → el BLE no espera 30 s.
+- `GuidedPairingTest`: falta ANT+, falta BLE, sobran, ya unidos, listo.
+- `DeviceCardsTest`: guardado + señales vistas, señal sin guardar, agrupado de sesión, "Unir con…" excluye
+  señales ya emparejadas.
+- Suite esperada: 209 + 18 = **227** (`DeviceBookTest` +1, `DualSlotAllocatorTest` +3 —incluye el caso sin
+  bloquear, en el que el BLE sí releva—, `DeviceCardsTest` 8, `GuidedPairingTest` 6; los dos últimos en
+  `app/src/test/.../ui/devices/`).
+
+**11.8 Evidencia para validar T-06**
+- Solo con BLE (ANT+ suele no responder): barra en Home/Tabata/Ruta (vertical y horizontal)/Config abre la hoja;
+  la flecha sigue reconectando; renombrar; fijar HR2 a una banda y verla pasar a HR2 en vivo con la sesión en
+  marcha sin que se pare; olvidar; Home con HR2 real. Logcat: `Registro:`, `ocupa su hueco guardado`,
+  `Dispositivos: hoja abierta/cerrada`.
+- Con ANT+: unir y separar una banda (separada, sus dos señales en HR1 y HR2; no se vuelven a juntar al caer
+  ANT+); modo guiado hasta "listo".
+
+**11.9 Hecho (2026-11-21) — notas de implementación**
+- Nuevos: `ui/devices/DeviceCards.kt` (lógica pura: `buildDeviceCards`, `linkCandidates`, `guidedPairing`),
+  `ui/devices/DevicesViewModel.kt`, `ui/devices/DevicesSheet.kt`, `ui/components/SensorBar.kt`.
+- Sensores (solo se añade): `VisibleSignal` + `describe()` y `blockedPair` en `DualSlotAllocator`; `signals` y
+  `unlinkSession` en los dos hubs; `block` en `DeviceBook` / `SensorDeviceRegistry`; fachada en `SensorManager`.
+- `slotSignalColor` pasa a `SensorSlotBadge.kt` (público). Borrados: Home `SensorBar`/`SensorWithBattery`/
+  `SensorDot`; Config `SlotStatusChip`; Tabata `SensorStatusChips`/`SensorChip`; Ruta `FreeRideSensorBar`,
+  `CompactSensorRow`, `SensorChipAnimated`, `SensorDot` y su `slotSignalColor` privado. `rememberSensorBatteries`
+  queda sin uso (no se borra).
+- Aviso "sesión en curso" bajo el selector de hueco: Config si no se puede empezar (`!canStartWorkout`), Tabata
+  con la fase distinta de parado/terminado, Ruta con `isRunning`. **Home: nunca** (no sabe si hay una sesión en
+  segundo plano); el cambio de hueco se aplica igual.
+- GPS en la barra: Home verde/gris según haya GPS; Tabata solo si está activado, verde con posición
+  (`isGpsTracking`) o gris (no hay estado "buscando" en Tabata); Ruta con/buscando/sin, como antes.
+- Ruta en horizontal (páginas 1 y 3): la barra compacta tiene el mismo tamaño que antes (solo se añade el toque);
+  el recorte de la 3.ª fila de la página 3 no se ha tocado.
+
 ## Archivos
 - Nuevos: `sensor/SensorDeviceRegistry.kt`, `sensor/PairingPolicy.kt`, `sensor/DualSlotAllocator.kt`,
   `sensor/CadenceHub.kt`, `sensor/AntRadio.kt`, `sensor/CscParser.kt`, `ui/components/SensorSlotBadge.kt`, `ui/components/SensorBar.kt`,
-  `ui/devices/DevicesSheet.kt` (+ ViewModel), `SensorSlotsViewModel` (dentro de `SensorSlotBadge.kt`),
-  tests en `app/src/test/.../sensor/`.
+  `ui/devices/DevicesSheet.kt`, `ui/devices/DevicesViewModel.kt`, `ui/devices/DeviceCards.kt`,
+  `SensorSlotsViewModel` (dentro de `SensorSlotBadge.kt`), tests en `app/src/test/.../sensor/` y
+  `app/src/test/.../ui/devices/`.
 - Modificados: `sensor/HeartRateHub.kt`, `sensor/SensorManager.kt`, `service/FreeRideService.kt`,
   `ui/freeride/FreeRideScreen.kt`, `ui/home/HomeScreen.kt`, `ui/workout/WorkoutScreen.kt`,
   `ui/config/ConfigViewModel.kt`, `ui/config/ConfigScreen.kt`.

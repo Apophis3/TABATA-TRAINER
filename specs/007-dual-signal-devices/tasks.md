@@ -66,6 +66,8 @@ usuario confirme la anterior con evidencia. El agente **no** ejecuta Gradle ni `
 - [ ] T-06 **Hoja "Dispositivos" común + Home.** Estado real por hueco en Home; hoja con
   unir/separar/renombrar/hueco/olvidar/reconectar/guiado; barra de sensores común `SensorBar` que abre la hoja
   al tocarla en Home, Tabata, Ruta (también en marcha) y Config (R8.1–R8.3); la flecha sigue reconectando.
+  *Código hecho 2026-11-21 (aprobado por el usuario; detalle en `plan.md` §11, notas en §11.9). Pendiente de
+  prueba: suite esperada 227 (209 + 18) y la evidencia de `plan.md` §11.8.*
 - [ ] T-07 **Validación real (usuario).** Una banda dual; dos bandas; cadenciómetro dual; caída/vuelta ANT+.
   Incluye lo aplazado: cadencia real de T-03 (C1 al pedalear, 0 rpm en ~3 s al parar sin perder hueco, C1/C2 con
   dos aparatos) y, de T-02, HR2 apagado en Home al quitar una banda.

@@ -64,7 +64,8 @@ quedan fallos:
 ## Restricciones
 - Sin cambios en Room, Gradle ni `NavGraph.kt`. Sin cambiar el ciclo de vida de `WorkoutService` /
   `FreeRideService`. El contrato de `SensorManager` se conserva (`observeHeartRate*`, `observeCadence*`,
-  baterías) y solo se amplía (R7.1 añade `SlotStatus.fresh`: el hueco tiene dato reciente).
+  baterías) y solo se amplía (R7.1 añade `SlotStatus.fresh`: el hueco tiene dato reciente; T-06 añade
+  `hrSignals()` / `cadenceSignals()`, señales visibles con su aparato y hueco, y `unlinkSession()` para la hoja).
 - Registro de aparatos en SharedPreferences; migra los vínculos de la spec 003 sin perderlos.
 
 ## Fuera de alcance

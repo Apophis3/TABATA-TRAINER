@@ -33,6 +33,8 @@ import com.tuapp.tabatatrainer.data.local.WorkoutPhase
 import com.tuapp.tabatatrainer.sensor.*
 import com.tuapp.tabatatrainer.service.WorkoutService
 import com.tuapp.tabatatrainer.ui.components.*
+import com.tuapp.tabatatrainer.ui.devices.DevicesSheet
+import androidx.compose.runtime.saveable.rememberSaveable
 import com.tuapp.tabatatrainer.ui.theme.TabataColors
 import com.tuapp.tabatatrainer.ui.theme.TabataSizes
 import com.tuapp.tabatatrainer.util.CustomConfigPreferences
@@ -88,6 +90,9 @@ fun ConfigScreen(
 
     val bleStatus by viewModel.bleStatus.collectAsState()
     val sensorSlots by viewModel.slots.collectAsState()
+
+    // Hoja "Dispositivos" (spec 007, T-06): se abre al tocar la barra de sensores
+    var showDevices by rememberSaveable { mutableStateOf(false) }
 
     // Detección de entrenamiento en curso
     var activeWorkout by remember { mutableStateOf(ActiveWorkoutInfo()) }
@@ -292,6 +297,7 @@ fun ConfigScreen(
                             bleStatus = bleStatus,
                             slots = sensorSlots,
                             onRefresh = { viewModel.startScanning() },
+                            onOpenDevices = { showDevices = true },
                             onGpsToggle = { viewModel.setGpsEnabled(it) }
                         )
 
@@ -355,6 +361,7 @@ fun ConfigScreen(
                     bleStatus = bleStatus,
                     slots = sensorSlots,
                     onRefresh = { viewModel.startScanning() },
+                    onOpenDevices = { showDevices = true },
                     onGpsToggle = { viewModel.setGpsEnabled(it) }
                 )
 
@@ -428,6 +435,15 @@ fun ConfigScreen(
             }
         }
     }
+
+    if (showDevices) {
+        DevicesSheet(
+            screen = "Config",
+            liveSession = !canStartWorkout,
+            onReconnect = { viewModel.startScanning() },
+            onDismiss = { showDevices = false }
+        )
+    }
 }
 
 // ============================================================================
@@ -478,6 +494,7 @@ private fun CompactSensorRowWithGps(
     bleStatus: BleScanStatus,
     slots: List<SlotStatus>,
     onRefresh: () -> Unit,
+    onOpenDevices: () -> Unit,
     onGpsToggle: (Boolean) -> Unit
 ) {
     Card(
@@ -492,46 +509,17 @@ private fun CompactSensorRowWithGps(
                 .fillMaxWidth()
                 .padding(12.dp)
         ) {
-            // Sensores por hueco (spec 007, T-04): HR1 HR2 / C1 C2, cada uno con valor, señal y batería
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    for (row in 0..1) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            for (col in 0..1) {
-                                val i = row * 2 + col
-                                SlotStatusChip(
-                                    label = SENSOR_SLOT_LABELS[i],
-                                    slot = slots[i],
-                                    isCadence = row == 1,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                        }
-                    }
-                }
-
-                IconButton(
-                    onClick = onRefresh,
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Refresh,
-                        contentDescription = "Refrescar",
-                        tint = TabataColors.VibrantOrange,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
+            // Barra de sensores común (spec 007, T-06): HR1 HR2 / C1 C2 con valor, señal y batería. Tocarla abre
+            // "Dispositivos"; la flecha reconecta como siempre
+            SensorBar(
+                slots = slots,
+                gps = null,
+                style = SensorBarStyle.CARD,
+                onOpenDevices = onOpenDevices,
+                onReconnect = onRefresh,
+                containerColor = Color.Transparent,
+                accent = TabataColors.VibrantOrange
+            )
 
             HorizontalDivider(
                 modifier = Modifier.padding(vertical = 8.dp),
@@ -595,42 +583,6 @@ private fun CompactSensorRowWithGps(
                 )
             }
         }
-    }
-}
-
-/**
- * Un hueco (HR1/HR2/C1/C2) en Config (spec 007, T-04): valor + hueco en recuadro de señal (ANT+ verde / BLE azul, R6.1) + batería.
- * Color del valor: verde con señal, naranja buscando (hueco libre), rojo si el aparato del hueco perdió la señal.
- * En cadencia 0 rpm con señal es un dato válido y se muestra "0".
- */
-@Composable
-private fun SlotStatusChip(
-    label: String,
-    slot: SlotStatus,
-    isCadence: Boolean,
-    modifier: Modifier = Modifier
-) {
-    val state = slot.signalState
-    val color = when (state) {
-        SlotSignalState.SIGNAL -> TabataColors.Connected
-        SlotSignalState.SEARCHING -> TabataColors.Scanning
-        SlotSignalState.LOST -> Color(0xFFE53935)
-    }
-    val value = if (state == SlotSignalState.SIGNAL && (isCadence || slot.value > 0)) "${slot.value}" else "--"
-
-    Row(
-        modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        Text(
-            text = value,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            color = color,
-            maxLines = 1
-        )
-        SensorSlotBadge(label, slot, labelColor = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
     }
 }
 

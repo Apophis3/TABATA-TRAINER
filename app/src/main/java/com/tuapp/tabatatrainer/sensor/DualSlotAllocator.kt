@@ -28,6 +28,27 @@ data class SlotStatus(
 )
 
 /**
+ * Una señal vista, con el aparato y el hueco al que pertenece ahora, para la hoja "Dispositivos" (spec 007, T-06).
+ * [group] = clave del aparato (registro, vínculo de sesión o la propia señal); [sessionOnly] = agrupada con otra
+ * señal solo en esta sesión (sin vínculo guardado).
+ */
+data class VisibleSignal(
+    val kind: SensorKind,
+    val id: String,
+    val name: String,
+    val isAnt: Boolean,
+    val value: Int,
+    val connected: Boolean,
+    val fresh: Boolean,
+    val battery: SensorBattery?,
+    val group: String,
+    val slot: Int?,
+    val sessionOnly: Boolean
+) {
+    val protocol: String get() = if (isAnt) "ANT+" else "BLE"
+}
+
+/**
  * Reparto de huecos para aparatos de doble señal (spec 007, T-02). Lógica pura, sin Android, común a pulso y
  * cadencia. Cada segundo recibe las señales vistas y decide qué aparato ocupa cada hueco y qué señal lo alimenta.
  *
@@ -84,6 +105,19 @@ class DualSlotAllocator(
     @Synchronized fun joinSession(id: String, group: String) { sessionTwins[id] = group }
 
     @Synchronized fun leaveSession(vararg ids: String) { ids.forEach { sessionTwins.remove(it) } }
+
+    /** Señales vistas con su aparato y su hueco (para la hoja "Dispositivos") */
+    @Synchronized
+    fun describe(signals: List<SignalState>): List<VisibleSignal> = signals.map { s ->
+        val g = groupOf(s.id)
+        VisibleSignal(
+            kind = kind, id = s.id, name = s.name, isAnt = s.isAnt, value = s.value, connected = s.connected,
+            fresh = s.fresh, battery = s.battery, group = g,
+            slot = slotGroup.indexOf(g).takeIf { it >= 0 },
+            sessionOnly = directory.pairKeyOf(kind, s.id) == null &&
+                (sessionTwins.containsKey(s.id) || sessionTwins.containsValue(s.id))
+        )
+    }
 
     // --- Ciclo de vida -----------------------------------------------------------------------------
 
@@ -229,7 +263,8 @@ class DualSlotAllocator(
         val d = byId[g] ?: return false
         if (isKnown(d.id)) return false
         val possibleTwin = signals.any { o ->
-            o.isAnt != d.isAnt && o.connected && directory.partnerOf(kind, o.id) == null && groupOf(o.id) in slotGroup
+            o.isAnt != d.isAnt && o.connected && directory.partnerOf(kind, o.id) == null && groupOf(o.id) in slotGroup &&
+                !blockedPair(o.id, d.id)
         }
         val orphanSlot = (0 until slots).any { i -> slotGroup[i]?.let { it !in live && canHandoff(it, d, signals) } == true }
         if (!possibleTwin && !orphanSlot) return false
@@ -240,10 +275,21 @@ class DualSlotAllocator(
         return now - since < quarantineMs
     }
 
-    /** Solo puede relevar si el aparato del hueco no tiene ya ese protocolo (si lo tuviera, sería otro aparato) */
+    /**
+     * Solo puede relevar si el aparato del hueco no tiene ya ese protocolo (si lo tuviera, sería otro aparato) ni
+     * el usuario ha separado esa pareja (bloqueada, R3).
+     */
     private fun canHandoff(slotGroupId: String, d: SignalState, signals: List<SignalState>): Boolean {
         val protocols = signals.filter { groupOf(it.id) == slotGroupId }.map { it.isAnt }.toSet()
-        return protocols.isNotEmpty() && d.isAnt !in protocols && directory.partnerOf(kind, d.id) == null
+        return protocols.isNotEmpty() && d.isAnt !in protocols && directory.partnerOf(kind, d.id) == null &&
+            idsOf(slotGroupId, signals).none { blockedPair(it, d.id) }
+    }
+
+    /** La pareja ANT+ ↔ BLE (en cualquier orden) está bloqueada porque el usuario la separó */
+    private fun blockedPair(a: String, b: String): Boolean = when {
+        a.startsWith(ANT_PREFIX) && !b.startsWith(ANT_PREFIX) -> directory.isBlocked(kind, a, b)
+        b.startsWith(ANT_PREFIX) && !a.startsWith(ANT_PREFIX) -> directory.isBlocked(kind, b, a)
+        else -> false
     }
 
     /** Regla 6: relevo sin solapamiento */

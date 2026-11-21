@@ -12,9 +12,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -51,11 +49,13 @@ import com.tuapp.tabatatrainer.data.local.SessionStats
 import com.tuapp.tabatatrainer.service.WorkoutService
 import com.tuapp.tabatatrainer.sensor.SlotStatus
 import com.tuapp.tabatatrainer.ui.components.BatteryLowWarnings
-import com.tuapp.tabatatrainer.ui.components.SENSOR_SLOT_LABELS
 import com.tuapp.tabatatrainer.ui.components.SensorSlotBadge
-import com.tuapp.tabatatrainer.ui.components.SlotSignalState
 import com.tuapp.tabatatrainer.ui.components.rememberSensorSlots
-import com.tuapp.tabatatrainer.ui.components.signalState
+import com.tuapp.tabatatrainer.ui.components.GpsIndicator
+import com.tuapp.tabatatrainer.ui.components.SensorBar
+import com.tuapp.tabatatrainer.ui.components.SensorBarStyle
+import com.tuapp.tabatatrainer.ui.devices.DevicesSheet
+import androidx.compose.runtime.saveable.rememberSaveable
 
 // ============================================================================
 // PALETA NIKE - SOLO CAMBIO DE COLORES
@@ -104,6 +104,10 @@ fun WorkoutScreen(
     val sessionStats by service?.sessionStats?.collectAsState() ?: remember { mutableStateOf(SessionStats()) }
 
     val pageCount = if (gpsEnabled) 2 else 1
+
+    // Reconectar (flecha de la barra y botón de la hoja) y hoja "Dispositivos" (spec 007, T-06)
+    val onRefreshSensors: () -> Unit = { service?.refreshSensors() }
+    var showDevices by rememberSaveable { mutableStateOf(false) }
     val pagerState = rememberPagerState(pageCount = { pageCount })
 
     val connection = remember {
@@ -167,7 +171,8 @@ fun WorkoutScreen(
                         onPause = { service?.pauseWorkout() },
                         onResume = { service?.resumeWorkout() },
                         onStop = { service?.stopWorkout() },
-                        onRefreshSensors = { service?.refreshSensors() }
+                        onRefreshSensors = onRefreshSensors,
+                        onOpenDevices = { showDevices = true }
                     )
                     1 -> GpsMetricsPage(
                         workoutState = workoutState,
@@ -175,7 +180,7 @@ fun WorkoutScreen(
                         sessionStats = sessionStats,
                         onPause = { service?.pauseWorkout() },
                         onResume = { service?.resumeWorkout() },
-                        onRefreshSensors = { service?.refreshSensors() }
+                        onRefreshSensors = onRefreshSensors
                     )
                 }
             }
@@ -209,7 +214,8 @@ fun WorkoutScreen(
                 onPause = { service?.pauseWorkout() },
                 onResume = { service?.resumeWorkout() },
                 onStop = { service?.stopWorkout() },
-                onRefreshSensors = { service?.refreshSensors() }
+                onRefreshSensors = onRefreshSensors,
+                onOpenDevices = { showDevices = true }
             )
         }
 
@@ -258,6 +264,17 @@ fun WorkoutScreen(
             )
         }
     }
+
+    if (showDevices) {
+        val phase = workoutState.phase
+        DevicesSheet(
+            screen = "Tabata",
+            liveSession = phase != WorkoutPhase.IDLE && phase != WorkoutPhase.FINISHED,
+            // Misma regla que la flecha: oculto en pausa
+            onReconnect = onRefreshSensors.takeIf { phase == WorkoutPhase.IDLE || workoutState.isRunning },
+            onDismiss = { showDevices = false }
+        )
+    }
 }
 
 // ============================================================================
@@ -276,7 +293,8 @@ private fun WorkoutMainPage(
     onPause: () -> Unit,
     onResume: () -> Unit,
     onStop: () -> Unit,
-    onRefreshSensors: () -> Unit
+    onRefreshSensors: () -> Unit,
+    onOpenDevices: () -> Unit
 ) {
     if (isLandscape) {
         LandscapeWorkoutLayout(
@@ -289,7 +307,8 @@ private fun WorkoutMainPage(
             onPause = onPause,
             onResume = onResume,
             onStop = onStop,
-            onRefreshSensors = onRefreshSensors
+            onRefreshSensors = onRefreshSensors,
+            onOpenDevices = onOpenDevices
         )
     } else {
         PortraitWorkoutLayout(
@@ -301,7 +320,8 @@ private fun WorkoutMainPage(
             onPause = onPause,
             onResume = onResume,
             onStop = onStop,
-            onRefreshSensors = onRefreshSensors
+            onRefreshSensors = onRefreshSensors,
+            onOpenDevices = onOpenDevices
         )
     }
 }
@@ -320,7 +340,8 @@ private fun PortraitWorkoutLayout(
     onPause: () -> Unit,
     onResume: () -> Unit,
     onStop: () -> Unit,
-    onRefreshSensors: () -> Unit
+    onRefreshSensors: () -> Unit,
+    onOpenDevices: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -330,34 +351,15 @@ private fun PortraitWorkoutLayout(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Barra superior: chips de sensores + refrescar. El margen izquierdo deja sitio a la flecha de volver
-        // (se pinta encima, en WorkoutScreen) para que no tape HR1
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = BACK_ARROW_CLEARANCE),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            SensorStatusChips(
-                sensorState = sensorState,
-                gpsEnabled = gpsEnabled,
-                modifier = Modifier.weight(1f, fill = false)
-            )
-            if (workoutState.phase == WorkoutPhase.IDLE || workoutState.isRunning) {
-                Spacer(modifier = Modifier.width(8.dp))
-                IconButton(
-                    onClick = onRefreshSensors,
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Refresh,
-                        contentDescription = "Refrescar sensores",
-                        tint = Color.White
-                    )
-                }
-            }
-        }
+        // Barra superior de sensores (común, spec 007 T-06): tocarla abre "Dispositivos"; la flecha reconecta.
+        // El margen izquierdo deja sitio a la flecha de volver (se pinta encima, en WorkoutScreen) para que no tape HR1
+        WorkoutSensorBar(
+            workoutState = workoutState,
+            sensorState = sensorState,
+            gpsEnabled = gpsEnabled,
+            onRefreshSensors = onRefreshSensors,
+            onOpenDevices = onOpenDevices
+        )
 
         // Gráfica HR de fondo con fase + cronómetro + ronda superpuestos.
         // Ocupa el espacio flexible => al menos la mitad de la pantalla.
@@ -457,7 +459,8 @@ private fun LandscapeWorkoutLayout(
     onPause: () -> Unit,
     onResume: () -> Unit,
     onStop: () -> Unit,
-    onRefreshSensors: () -> Unit
+    onRefreshSensors: () -> Unit,
+    onOpenDevices: () -> Unit
 ) {
     // Reduce ~20% la altura del bloque inferior solo en móvil (en tablet ya se ve bien)
     val bottomScale = if (isTablet) 1f else 0.8f
@@ -469,34 +472,15 @@ private fun LandscapeWorkoutLayout(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Barra superior: chips de sensores + refrescar. El margen izquierdo deja sitio a la flecha de volver
-        // (se pinta encima, en WorkoutScreen) para que no tape HR1
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = BACK_ARROW_CLEARANCE),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            SensorStatusChips(
-                sensorState = sensorState,
-                gpsEnabled = gpsEnabled,
-                modifier = Modifier.weight(1f, fill = false)
-            )
-            if (workoutState.phase == WorkoutPhase.IDLE || workoutState.isRunning) {
-                Spacer(modifier = Modifier.width(8.dp))
-                IconButton(
-                    onClick = onRefreshSensors,
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Refresh,
-                        contentDescription = "Refrescar sensores",
-                        tint = Color.White
-                    )
-                }
-            }
-        }
+        // Barra superior de sensores (común, spec 007 T-06): tocarla abre "Dispositivos"; la flecha reconecta.
+        // El margen izquierdo deja sitio a la flecha de volver (se pinta encima, en WorkoutScreen) para que no tape HR1
+        WorkoutSensorBar(
+            workoutState = workoutState,
+            sensorState = sensorState,
+            gpsEnabled = gpsEnabled,
+            onRefreshSensors = onRefreshSensors,
+            onOpenDevices = onOpenDevices
+        )
 
         // Gráfica HR de fondo con fase + cronómetro + ronda superpuestos.
         Box(
@@ -835,59 +819,27 @@ private fun TotalTimeDisplay(totalSeconds: Int, isLandscape: Boolean, heightScal
     }
 }
 
-/**
- * Chips compactos de la barra superior (spec 007, T-04): punto verde = hueco con señal, naranja = buscando
- * (hueco libre), rojo = el aparato del hueco ha perdido la señal. Sin icono para que quepan junto a la flecha
- * de volver; si aun así no caben (GPS + pantalla estrecha) se desplazan en horizontal.
- */
+/** Barra de sensores de Tabata: la común en fila, sin batería; GPS solo si está activado; flecha solo parado o en marcha */
 @Composable
-private fun SensorStatusChips(sensorState: SensorState, gpsEnabled: Boolean, modifier: Modifier = Modifier) {
-    val slots = rememberSensorSlots()
-    Row(
-        modifier = modifier.horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        slots.forEachIndexed { i, slot ->
-            SensorChip(
-                label = SENSOR_SLOT_LABELS[i],
-                isConnected = slot.signalState == SlotSignalState.SIGNAL,
-                isScanning = slot.signalState == SlotSignalState.SEARCHING
-            )
-        }
-        if (gpsEnabled) {
-            SensorChip(
-                label = "GPS",
-                isConnected = sensorState.isGpsTracking,
-                isScanning = false
-            )
-        }
-    }
-}
-
-@Composable
-private fun SensorChip(label: String, isConnected: Boolean, isScanning: Boolean = false) {
-    val dotColor = when {
-        isConnected -> TabataColors.Connected
-        isScanning -> Color(0xFFFFA500)
-        else -> TabataColors.RestRed
-    }
-
-    Row(
+private fun WorkoutSensorBar(
+    workoutState: WorkoutState,
+    sensorState: SensorState,
+    gpsEnabled: Boolean,
+    onRefreshSensors: () -> Unit,
+    onOpenDevices: () -> Unit
+) {
+    SensorBar(
+        slots = rememberSensorSlots(),
+        gps = if (!gpsEnabled) null else if (sensorState.isGpsTracking) GpsIndicator.FIX else GpsIndicator.OFF,
+        style = SensorBarStyle.ROW,
+        onOpenDevices = onOpenDevices,
         modifier = Modifier
-            .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(20.dp))
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(label, color = Color.White, fontSize = 12.sp, maxLines = 1)
-        Spacer(modifier = Modifier.width(4.dp))
-        Box(
-            modifier = Modifier
-                .size(8.dp)
-                .clip(CircleShape)
-                .background(dotColor)
-        )
-    }
+            .fillMaxWidth()
+            .padding(start = BACK_ARROW_CLEARANCE),
+        onReconnect = onRefreshSensors.takeIf { workoutState.phase == WorkoutPhase.IDLE || workoutState.isRunning },
+        showBattery = false,
+        accent = Color.White
+    )
 }
 
 @Composable

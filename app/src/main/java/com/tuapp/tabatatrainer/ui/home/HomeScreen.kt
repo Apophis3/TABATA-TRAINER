@@ -33,9 +33,12 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.tuapp.tabatatrainer.ui.config.BleScanStatus
-import com.tuapp.tabatatrainer.sensor.SensorBattery
-import com.tuapp.tabatatrainer.ui.components.BatteryBadge
-import com.tuapp.tabatatrainer.ui.components.rememberSensorBatteries
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.tuapp.tabatatrainer.ui.components.GpsIndicator
+import com.tuapp.tabatatrainer.ui.components.SensorBar
+import com.tuapp.tabatatrainer.ui.components.SensorBarStyle
+import com.tuapp.tabatatrainer.ui.components.rememberSensorSlots
+import com.tuapp.tabatatrainer.ui.devices.DevicesSheet
 import com.tuapp.tabatatrainer.ui.config.ConfigViewModel
 import android.app.Activity
 import android.content.Intent
@@ -53,7 +56,6 @@ private val NikeGrayLight = Color(0xFF2D2D2D)
 private val SurfaceCard = Color(0xFF252525)
 private val TextSecondary = Color(0xFFAAAAAA)
 private val FreeRideGreen = Color(0xFF4CAF50)
-private val HeartPink = Color(0xFFE91E63)
 private val StatsBlue = Color(0xFF2196F3)
 private val DangerRed = Color(0xFFE53935)
 
@@ -75,6 +77,7 @@ private val TabletDims = HomeDims(32.dp, 20.dp, 32.sp, 32.sp, 17.sp, 88.dp, 24.s
 /** Callbacks agrupados para no arrastrarlos uno a uno por cada layout */
 private class HomeActions(
     val onRefresh: () -> Unit,
+    val onOpenDevices: () -> Unit,
     val onStartFreeRide: () -> Unit,
     val onStartTabata: () -> Unit,
     val onNavigateToHistory: () -> Unit,
@@ -98,8 +101,12 @@ fun HomeScreen(
 
     LaunchedEffect(Unit) { viewModel.startScanning() }
 
+    // Hoja "Dispositivos" (spec 007, T-06): se abre al tocar la barra de sensores
+    var showDevices by rememberSaveable { mutableStateOf(false) }
+
     val actions = HomeActions(
         onRefresh = { viewModel.refreshSensors() },
+        onOpenDevices = { showDevices = true },
         onStartFreeRide = onStartFreeRide,
         onStartTabata = onStartTabata,
         onNavigateToHistory = onNavigateToHistory,
@@ -132,6 +139,15 @@ fun HomeScreen(
             }
         }
     }
+
+    if (showDevices) {
+        DevicesSheet(
+            screen = "Home",
+            liveSession = false,
+            onReconnect = actions.onRefresh,
+            onDismiss = { showDevices = false }
+        )
+    }
 }
 
 @Composable
@@ -149,7 +165,7 @@ private fun PortraitLayout(
         verticalArrangement = Arrangement.spacedBy(dims.gap)
     ) {
         HeaderRow(dims)
-        SensorBar(bleStatus, actions.onRefresh)
+        HomeSensorBar(bleStatus, actions)
         SectionTitle("Elige tu actividad", dims)
 
         // Fila 1: las actividades se reparten el alto sobrante (sin huecos abajo)
@@ -186,7 +202,7 @@ private fun LandscapeLayout(
             verticalArrangement = Arrangement.spacedBy(if (compactHeight) 8.dp else dims.gap)
         ) {
             HeaderRow(dims)
-            SensorBar(bleStatus, actions.onRefresh)
+            HomeSensorBar(bleStatus, actions)
             if (!compactHeight) Spacer(Modifier.weight(1f))
             SummaryRow(summary, dims, actions.onNavigateToHistory)
             ActionBar(actions, dims)
@@ -271,77 +287,18 @@ private fun appVersionName(): String {
     }
 }
 
+/** Barra de sensores común (spec 007, T-06): tocarla abre "Dispositivos"; la flecha reconecta como siempre */
 @Composable
-private fun SensorBar(
-    bleStatus: BleScanStatus,
-    onRefresh: () -> Unit
-) {
-    val batteries = rememberSensorBatteries()
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(SurfaceCard, RoundedCornerShape(16.dp))
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // HR1 / C1 arriba, HR2 / C2 abajo, cada uno con su batería (spec 005 T-05)
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically) {
-                SensorWithBattery("HR1", bleStatus.hrConnected, HeartPink, batteries[0])
-                SensorWithBattery("C1", bleStatus.cadenceConnected, StatsBlue, batteries[2])
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically) {
-                // Sin flujo propio de HR2/C2 en la Home: se marca conectado si ya hay dato de batería
-                SensorWithBattery("HR2", batteries[1] != null, HeartPink, batteries[1])
-                SensorWithBattery("C2", batteries[3] != null, StatsBlue, batteries[3])
-            }
-        }
-
-        SensorDot("GPS", bleStatus.gpsAvailable, FreeRideGreen)
-
-        IconButton(onClick = onRefresh, modifier = Modifier.size(36.dp)) {
-            Icon(
-                Icons.Default.Refresh,
-                "Refrescar",
-                tint = NikeOrange,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-    }
-}
-
-@Composable
-private fun SensorWithBattery(label: String, connected: Boolean, color: Color, battery: SensorBattery?) {
-    Row(
-        modifier = Modifier.widthIn(min = 96.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        SensorDot(label, connected, color)
-        BatteryBadge(battery, fontSize = 11.sp)
-    }
-}
-
-@Composable
-private fun SensorDot(label: String, connected: Boolean, color: Color) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(10.dp)
-                .clip(CircleShape)
-                .background(if (connected) color else Color.Gray.copy(alpha = 0.4f))
-        )
-        Text(
-            label,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Medium,
-            color = if (connected) Color.White else TextSecondary
-        )
-    }
+private fun HomeSensorBar(bleStatus: BleScanStatus, actions: HomeActions) {
+    SensorBar(
+        slots = rememberSensorSlots(),
+        gps = if (bleStatus.gpsAvailable) GpsIndicator.FIX else GpsIndicator.OFF,
+        style = SensorBarStyle.CARD,
+        onOpenDevices = actions.onOpenDevices,
+        onReconnect = actions.onRefresh,
+        containerColor = SurfaceCard,
+        accent = NikeOrange
+    )
 }
 
 /** Tarjeta de actividad: ocupa todo el espacio de [modifier]; icono arriba, botón abajo */
