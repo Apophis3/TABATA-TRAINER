@@ -13,7 +13,7 @@ Documento para continuar en un hilo nuevo. Pegar en el hilo nuevo:
 - Funciona con dos bandas a la vez.
 - En todas las pantallas se ve hueco + señal (ANT+ verde / BLE azul) y batería (R6). Cadencia con el mismo criterio.
 
-## Estado (último commit `7ccad3a`, versión instalada 1.6.117)
+## Estado (último commit `59e02ae`, versión instalada 1.6.117)
 - **T-01 [x]** registro genérico `SensorDeviceRegistry`/`DeviceBook` + `PairingPolicy`.
 - **T-02 [x]** `DualSlotAllocator` (huecos fijos, ANT+ desplaza a BLE, cuarentena, `SlotStatus`).
 - **T-03 [x]** salvo prueba real de cadencia: `CadenceHub`, `CscParser`, `AntRadio` (una búsqueda ANT+
@@ -25,27 +25,24 @@ Documento para continuar en un hilo nuevo. Pegar en el hilo nuevo:
   `SensorManager.hrSlotStatus/cadenceSlotStatus`; `ui/components/SensorSlotBadge.kt` (`ProtocolBadge`,
   `SensorSlotBadge`, `SensorSlotsViewModel` + `rememberSensorSlots()`, `SlotStatus.signalState`); Tabata con
   señal/batería/punto desde `SlotStatus` y barra superior apartada de la flecha; Config con rejilla HR1 HR2 / C1 C2.
-  Detalle en `plan.md` §7. T-05, T-06, T-07 sin empezar. Una tarea cada vez.
+  Detalle en `plan.md` §7. Siguiente: T-05. T-06 y T-07 sin empezar. Una tarea cada vez.
 
-## T-04 — punto de partida (hueco y señal en Tabata y Config)
-- Qué pide (`tasks.md`, `plan.md` §7): componente `ui/components/SensorSlotBadge.kt` (HR1/HR2/C1/C2 +
-  insignia ANT+/BLE + batería, reutilizando `ProtocolBadge`); Tabata lee `SlotStatus`; Config muestra
-  HR1/HR2/C1/C2 con su señal.
+## T-05 — punto de partida (Ruta Libre separada, R7)
+- Qué pide (`tasks.md`, `plan.md` "Ruta"): HR1/HR2 y C1/C2 por separado con su señal y batería, como Tabata;
+  medias de HR1 y HR2 separadas; escuchar C2. Anotar el detalle en `plan.md` antes del código.
 - Lo que ya existe:
-  - `SlotStatus(slot, deviceKey, alias, sourceId, sourceName, protocol, connected, value, battery)` en
-    `sensor/DualSlotAllocator.kt`. Los hubs lo exponen: `HeartRateHub.slotStatus(slot)` y
-    `CadenceHub.slotStatus(slot)` (`StateFlow`). **`SensorManager` aún no lo expone**: hay que añadir
-    `hrSlotStatus(slot)` / `cadenceSlotStatus(slot)` — es ampliar el contrato (permitido por la spec: "solo se
-    amplía"), anotarlo en `plan.md` antes.
-  - Tabata (`ui/workout/WorkoutScreen.kt`): ya pinta HR1/HR2/C1/C2 (≈ l. 832–853 y 913–1000) con una lista
-    `protocols` y un `ProtocolBadge` privado (≈ l. 1042) → sacarlo a `SensorSlotBadge` y alimentarlo con
-    `SlotStatus`.
-  - Config (`ui/config/ConfigScreen.kt` + `ConfigViewModel.kt`): solo HR1 y C1 (`observeCadence()`); añadir
-    HR2 y C2 con señal.
-  - Baterías por hueco: `SensorManager.hrBattery(slot)` / `cadenceBattery(slot)` (Home las usa vía
-    `SensorBatteryViewModel`).
-- Fallo visual conocido a arreglar en T-04: en Tabata la flecha de volver tapa el chip HR1.
-- No tocar en T-04: Ruta Libre (es T-05), Home y la hoja "Dispositivos" / `SensorBar` (es T-06).
+  - `service/FreeRideService.kt` (~1176 l.): `FreeRideStats` (l. 44) tiene un solo `heartRate`, `avgHeartRate`,
+    `maxHeartRate`, `cadence`, `avgCadence`. Escucha `observeHeartRate()` (l. 321) y `observeHeartRate2()`
+    (l. 391): los dos escriben en `heartRate` y mezclan medias con `hrReadings + hr2Readings` (l. 357 y 418).
+    Solo escucha `observeCadence()` (l. 457), no C2.
+  - Al guardar (≈ l. 1039–1069) ya separa `avgHeartRate2/maxHeartRate2/minHeartRate2` y `heartRate2` por
+    segundo; `sensor_readings` no tiene `cadence2` → no se guarda C2 (Room fuera de alcance: solo en pantalla).
+  - `ui/freeride/FreeRideScreen.kt` (~1391 l.): "HR" único (l. 339, 713, 990); baterías con `BatteryBadge`
+    (≈ l. 1145–1151). Reutilizar `SensorSlotBadge` / `rememberSensorSlots()` de T-04.
+  - `FreeRideService` es servicio en primer plano: ampliar `FreeRideStats` sin tocar su ciclo de vida (Clave 3).
+- No tocar en T-05: Home y la hoja "Dispositivos" / `SensorBar` (es T-06), Room.
+- Pendiente visto en T-04 (fuera de alcance, solo si el usuario lo pide): en Config el lápiz flotante tapa en
+  parte el interruptor del GPS; al quitar una banda ANT+ sigue dando el último valor ~10–20 s.
 
 ## Observaciones de la última prueba (1.6.111 → 1.6.113)
 - Al arrancar, el receptor ANT+ a veces responde ADAPTER_NOT_DETECTED 1–2 min (del móvil/servicio ANT+; ya
@@ -70,6 +67,9 @@ Documento para continuar en un hilo nuevo. Pegar en el hilo nuevo:
   Hay dos dispositivos en `adb devices` (uno "offline"): usar `-s adb-R3CTA0JHTEZ-ORXOOh._adb-tls-connect._tcp`.
 - **La evidencia la lee el agente, no se pide en capturas:** S22+ por adb inalámbrico; tras compilar el
   usuario, los tests quedan en `app/build/test-results/testDebugUnitTest/*.xml`.
+- Lecturas guardadas por segundo (HR1/HR2/cadencia): copiar la BD con
+  `adb exec-out run-as com.tuapp.tabatatrainer cat databases/tabata_trainer_db` (y `-wal`, `-shm`) a la carpeta
+  temporal y leerla con `C:/Users/APO/Tools/SQLite/sqlite3` (tabla `sensor_readings`). Solo lectura.
 - La versión instalada se ve en `version.properties` (BUILD sube en cada APK) y con
   `adb shell dumpsys package com.tuapp.tabatatrainer` (versionName, lastUpdateTime).
 - Sin dependencias Gradle, sin cambios en Room, sin tocar el contrato de `SensorManager` sin spec (solo ampliar).
