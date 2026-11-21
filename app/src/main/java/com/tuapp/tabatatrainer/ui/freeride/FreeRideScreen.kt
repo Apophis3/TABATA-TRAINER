@@ -1126,17 +1126,23 @@ private fun slotSignalColor(status: SlotStatus?): Color = when (status?.signalSt
     else -> Color(0xFFFFA500)
 }
 
-/** Fila compacta para apaisado: GPS y un punto por hueco (HR1, HR2, C1, C2) */
+/**
+ * Fila compacta para apaisado: GPS y los 4 huecos (HR1, HR2, C1, C2), cada uno en su recuadro de señal (ANT+ verde /
+ * BLE azul, R6.1) como la barra vertical; sin batería por falta de ancho (plan §10)
+ */
 @Composable
 private fun CompactSensorRow(stats: FreeRideStats, slots: List<SlotStatus>) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         SensorDot(Icons.Default.GpsFixed, stats.isGpsConnected, stats.isGpsScanning, TabataColors.WorkGreen)
         SENSOR_SLOT_LABELS.forEachIndexed { i, label ->
-            val c = slotSignalColor(slots.getOrNull(i))
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                Box(Modifier.size(8.dp).background(c, CircleShape))
-                Text(label, fontSize = 10.sp, color = c, maxLines = 1)
-            }
+            val status = slots.getOrNull(i)
+            SensorSlotBadge(
+                label = label,
+                status = status,
+                labelColor = slotSignalColor(status),
+                fontSize = 10.sp,
+                showBattery = false
+            )
         }
     }
 }
@@ -1307,35 +1313,50 @@ private fun LandscapeLapsPage(
             modifier = Modifier
                 .weight(0.35f)
                 .fillMaxHeight(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Sensores compactos: GPS y un punto por hueco (HR1, HR2, C1, C2)
-            CompactSensorRow(stats, slots)
+            // Parte de arriba desplazable si no cupiera (con una vuelta cerrada la franja crece a título + 2x2):
+            // así los controles de abajo nunca se recortan (plan §8)
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                // Sensores compactos: GPS y los 4 huecos con su recuadro de señal
+                CompactSensorRow(stats, slots)
 
-            // Estado "EN RUTA"
-            StatusLabel(stats = stats, fontSize = 14)
+                // Estado "EN RUTA"
+                StatusLabel(stats = stats, fontSize = 14)
 
-            // Timer grande (tiempo total)
-            Text(
-                formatDuration(stats.totalTimeSeconds),
-                fontSize = 56.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
+                // Timer grande (tiempo total)
+                Text(
+                    formatDuration(stats.totalTimeSeconds),
+                    fontSize = 52.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
 
-            // Resumen de la última vuelta manual cerrada (el historial completo está en la ventana 4)
-            LastLapStrip(lastManual, compact = true)
+                // Resumen de la última vuelta manual cerrada (el historial completo está en la ventana 4)
+                LastLapStrip(lastManual, compact = true)
+            }
+
+            // Controles compactos al pie de esta columna, como en la página 1: en la derecha quedaban encima del
+            // indicador de páginas (plan §8)
+            Spacer(modifier = Modifier.height(6.dp))
+            FreeRideControlsCompact(stats, onStart, onPause, onResume, onStop, onLap)
         }
 
         // ============================================================
-        // DERECHA: Panel de la vuelta manual en curso y controles (65%)
+        // DERECHA: Panel de la vuelta manual en curso (65%), con hueco abajo para el indicador de páginas
         // ============================================================
         Column(
             modifier = Modifier
                 .weight(0.65f)
                 .fillMaxHeight()
-                .padding(start = 8.dp),
+                .padding(start = 8.dp, bottom = PAGE_INDICATOR_CLEARANCE),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(
@@ -1350,8 +1371,9 @@ private fun LandscapeLapsPage(
                 LapStatGrid(
                     stats = currentLapStats(stats),
                     columns = 3,
-                    valueFontSize = 26.sp,
-                    cardPadding = 6.dp,
+                    // 22 sp / 5 dp: así caben las 3 filas sobre el hueco del indicador (plan §8)
+                    valueFontSize = 22.sp,
+                    cardPadding = 5.dp,
                     spacing = 6.dp,
                     modifier = Modifier.verticalScroll(rememberScrollState())
                 )
@@ -1363,7 +1385,7 @@ private fun LandscapeLapsPage(
                     onClick = onLap,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(48.dp),
+                        .height(44.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700)),
                     shape = RoundedCornerShape(12.dp)
                 ) {
@@ -1372,9 +1394,6 @@ private fun LandscapeLapsPage(
                     Text("NUEVA VUELTA", color = Color.Black, fontWeight = FontWeight.Bold)
                 }
             }
-
-            // Controles compactos
-            FreeRideControlsCompact(stats, onStart, onPause, onResume, onStop, onLap)
         }
     }
 }

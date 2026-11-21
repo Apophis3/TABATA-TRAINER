@@ -37,7 +37,8 @@ quedan fallos:
   ve qué hueco es (HR1/HR2, C1/C2) y por qué señal llega (ANT+ verde / BLE azul), con su batería.
   - **R6.1 — Señal por recuadro de color** *(petición del usuario 2026-11-21)*: la señal ya no se escribe
     ("ANT+"/"BLE"); el nombre del hueco va dentro de un recuadro verde si llega por ANT+ y azul si llega por BLE.
-    Sin señal, sin recuadro. Ahorra ancho en barras y tarjetas. Igual en todas las pantallas.
+    Sin señal, sin recuadro. Ahorra ancho en barras y tarjetas. Igual en todas las pantallas, también en la
+    barra compacta de Ruta en horizontal (páginas 1 y 3; ahí sin batería, como antes, por falta de ancho).
 - **R7 — Ruta Libre separada.** HR1/HR2 y C1/C2 por separado, como en Tabata; medias de HR1 y HR2 separadas.
   C2 en Ruta solo en vivo (guardarlo exige cambiar Room → otra spec).
   - **R7.1 — Un pulsómetro, tarjeta grande** *(petición del usuario 2026-11-21)*: en la página 1 de Ruta

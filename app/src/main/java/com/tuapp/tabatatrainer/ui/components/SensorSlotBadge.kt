@@ -75,7 +75,7 @@ fun protocolColor(protocol: String?): Color? = when {
  * Hueco + señal + batería (R6, R6.1): el nombre del hueco va dentro de un recuadro verde (ANT+) o azul (BLE);
  * sin señal, sin recuadro (borde transparente con el mismo hueco, para que nada salte al conectar).
  * [stacked] pone la batería debajo (ahorra ancho en Tabata). La batería solo sale si el hueco tiene fuente
- * (ver `DualSlotAllocator`).
+ * (ver `DualSlotAllocator`) y [showBattery] es true (la barra compacta de Ruta en horizontal no la lleva).
  */
 @Composable
 fun SensorSlotBadge(
@@ -84,7 +84,8 @@ fun SensorSlotBadge(
     modifier: Modifier = Modifier,
     labelColor: Color = Color.White.copy(alpha = 0.6f),
     fontSize: TextUnit = 11.sp,
-    stacked: Boolean = false
+    stacked: Boolean = false,
+    showBattery: Boolean = true
 ) {
     val protocol = status?.protocol
     val signal = protocolColor(protocol)
@@ -103,13 +104,13 @@ fun SensorSlotBadge(
                     .border(1.5.dp, signal ?: Color.Transparent, shape)
                     .padding(horizontal = 4.dp, vertical = 1.dp)
             )
-            if (!stacked) BatteryBadge(status?.battery)
+            if (!stacked && showBattery) BatteryBadge(status?.battery)
         }
     }
     if (stacked) {
         Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
             labelRow()
-            BatteryBadge(status?.battery, modifier = Modifier.padding(top = 2.dp))
+            if (showBattery) BatteryBadge(status?.battery, modifier = Modifier.padding(top = 2.dp))
         }
     } else {
         Row(modifier = modifier) { labelRow() }

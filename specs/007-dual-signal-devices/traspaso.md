@@ -2,7 +2,18 @@
 
 Documento para continuar en un hilo nuevo (texto de arranque: el que da el agente en el chat).
 
-## Siguiente (2026-11-21, tras la 1.6.130)
+## Siguiente (2026-11-21, tras la 1.6.134)
+- **Los tres arreglos previos a T-06 (§8, §9, §10) validados y marcados `[x]`** con la 1.6.134 (suite 209/209).
+  Menor, no bloquea: en la página 3 de Ruta en horizontal el borde de abajo de la 3.ª fila queda recortado unos
+  dp; sin probar esa página con una vuelta cerrada. Siguiente: **T-06**, solo cuando el usuario lo diga.
+
+## Antes (tras la 1.6.132)
+0. **Prueba 1.6.132 hecha** (suite 209/209 tras R6.1; "Pasos/min" visto; BLE por fallo de ANT+). Arreglados
+   después y sin probar: página 3 de Ruta en horizontal (botones a la izquierda, `plan.md` §8) y barra compacta
+   horizontal con recuadro (`plan.md` §10). Falta: capturas de página 3 y página 1 (con pasos > 0) en
+   horizontal, y Tabata con el recuadro. Luego marcar `[x]` los tres arreglos si el usuario lo confirma.
+
+## Antes (tras la 1.6.130)
 1. **Cerrar lo pendiente antes de T-06** (código hecho, falta evidencia del usuario). Cuando el usuario compile,
    instale y pruebe: leer tests (`app/build/test-results/testDebugUnitTest/*.xml`, esperado 209/209) y Logcat;
    capturas con `adb exec-out screencap -p`. Si confirma, marcar `[x]` en `tasks.md`:
@@ -26,7 +37,7 @@ Documento para continuar en un hilo nuevo (texto de arranque: el que da el agent
 - En todas las pantallas se ve el hueco dentro de un recuadro verde (ANT+) o azul (BLE) y la batería (R6, R6.1).
   Cadencia con el mismo criterio.
 
-## Estado (T-01…T-05 validadas; tres arreglos previos a T-06 hechos, a falta de capturas)
+## Estado (T-01…T-05 y los tres arreglos previos a T-06 validados)
 - **T-01 [x]** registro genérico `SensorDeviceRegistry`/`DeviceBook` + `PairingPolicy`.
 - **T-02 [x]** `DualSlotAllocator` (huecos fijos, ANT+ desplaza a BLE, cuarentena, `SlotStatus`).
 - **T-03 [x]** salvo cadencia real: `CadenceHub`, `CscParser`, `AntRadio` (búsqueda ANT+ compartida),

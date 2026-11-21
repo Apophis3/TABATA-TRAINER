@@ -41,21 +41,28 @@ usuario confirme la anterior con evidencia. El agente **no** ejecuta Gradle ni `
   tarjeta HR1 | HR2, C1 | C2 si hay cadencia (si no, ritmo), vuelta en curso con HR1 y HR2, barra con GPS y los
   4 huecos. Sin probar: cierre de vueltas (pasa a T-07), C2 y cadencia real (T-07). Visto: en horizontal la
   franja de pasos queda bajo el indicador de páginas (la columna se desplaza).
-- [ ] Arreglos menores *(pedidos por el usuario 2026-11-21 antes de T-06; detalle en `plan.md` §8)*: valor
+- [x] Arreglos menores *(validados 2026-11-21 con la 1.6.134: suite 209/209; capturas de Ruta horizontal páginas 1 y 3)* *(pedidos por el usuario 2026-11-21 antes de T-06; detalle en `plan.md` §8)*: valor
   congelado al quitar una banda (ANT+ sin latidos nuevos, BLE sin contacto → R2.1); Ruta horizontal con la franja
   de pasos bajo el indicador de páginas. (El "lápiz" de Config no es un fallo: es el S Pen del usuario; no se toca.)
-  *Prueba 1.6.123: suite 202/202 verde; corte BLE "sin contacto" visto en Logcat. Falta: parte ANT+ (no conectó,
-  ADAPTER_NOT_DETECTED) y capturas de Ruta horizontal/vertical.*
-- [ ] Ruta: un pulsómetro → tarjeta grande; cadencia o pasos/min en la vuelta *(pedido por el usuario
+  *Prueba 1.6.123: suite 202/202 verde; corte BLE "sin contacto" visto en Logcat. Parte ANT+ vista en la 1.6.128.
+  Prueba 1.6.132: suite 209/209; en la página 3 en horizontal los botones tapaban el indicador de páginas y la
+  última fila quedaba cortada → corregido (botones a la columna izquierda, `plan.md` §8). Falta: página 3 en
+  horizontal tras el arreglo y página 1 en horizontal con la franja de pasos (con pasos > 0). Prueba 1.6.134: vistas
+  las dos; queda un recorte menor del borde de la 3.ª fila de la página 3 en horizontal y sin probar con una vuelta
+  cerrada (no bloquea).*
+- [x] *(validada 2026-11-21 con la 1.6.134: suite 209/209; "Pasos/min" en página 3 vertical y horizontal; tarjeta partida/única vista)* Ruta: un pulsómetro → tarjeta grande; cadencia o pasos/min en la vuelta *(pedido por el usuario
   2026-11-21; `spec.md` R7.1–R7.2, `plan.md` §9)*: en la página 1, con un solo pulsómetro con señal, una sola
   tarjeta de pulso con el número lo más grande posible (con dos, HR1 | HR2); en la página 3, la misma casilla
   muestra "Cadencia" (rpm) con cadenciómetro y "Pasos/min" (ppm de la vuelta) sin él.
-  *Prueba 1.6.128: suite 209/209; una y dos bandas, quitar/poner: tarjeta única ↔ partida sin parpadeo. Falta
-  página 3 y horizontal.*
-- [ ] Señal por recuadro de color *(pedido por el usuario 2026-11-21; `spec.md` R6.1, `plan.md` §10)*: el hueco
+  *Prueba 1.6.128: suite 209/209; una y dos bandas, quitar/poner: tarjeta única ↔ partida sin parpadeo.
+  Prueba 1.6.132: página 3 en vertical dice "Pasos/min" (7 ppm) sin cadenciómetro; página 1 partida en vertical y
+  horizontal. Prueba 1.6.134: página 3 en horizontal con "Pasos/min" (57 ppm).*
+- [x] *(validada 2026-11-21 con la 1.6.134: suite 209/209; recuadro azul BLE en Ruta (barra, barra compacta y tarjetas) y Tabata; verde ANT+ visto en Config (1.6.130), confirmado por el usuario)* Señal por recuadro de color *(pedido por el usuario 2026-11-21; `spec.md` R6.1, `plan.md` §10)*: el hueco
   (HR1/HR2/C1/C2) dentro de un recuadro verde (ANT+) o azul (BLE) en lugar del texto "ANT+"/"BLE".
   *Prueba 1.6.130: captura de Config con HR1/HR2 en recuadro verde (ANT+); Logcat: HR1 pasa de BLE a ANT+ y vuelve
-  tras una caída de 3 s, sin errores. Falta: tests tras el cambio y capturas de Tabata y Ruta.*
+  tras una caída de 3 s, sin errores. Prueba 1.6.132: suite 209/209 tras el cambio; Ruta en vertical con HR1/HR2
+  en recuadro azul (BLE; ANT+ no respondió) en barra y tarjeta. La barra compacta de Ruta en horizontal seguía con
+  puntos → corregido (`plan.md` §10). Prueba 1.6.134: barra compacta y Tabata con recuadro azul.*
 - [ ] T-06 **Hoja "Dispositivos" común + Home.** Estado real por hueco en Home; hoja con
   unir/separar/renombrar/hueco/olvidar/reconectar/guiado; barra de sensores común `SensorBar` que abre la hoja
   al tocarla en Home, Tabata, Ruta (también en marcha) y Config (R8.1–R8.3); la flecha sigue reconectando.

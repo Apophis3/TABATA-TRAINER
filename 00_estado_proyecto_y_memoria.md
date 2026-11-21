@@ -6,6 +6,46 @@ memoria privada de Claude. **Lo más reciente arriba.**
 
 ---
 
+## 2026-11-21 — Spec 007 · Prueba 1.6.132 y arreglos de Ruta en horizontal (validados con la 1.6.134)
+
+### Prueba del usuario (1.6.132, instalada 17:54:44)
+- Tests (17:53): 209/209 verdes, ya tras el cambio del recuadro de color.
+- Logcat: sin cierres ni errores. ANT+ no respondió en toda la prueba (ADAPTER_NOT_DETECTED cada 15 s); HR1
+  XOSS y HR2 Decathlon por BLE → recuadros azules, correcto.
+- Capturas: Ruta página 1 vertical y horizontal con tarjeta partida HR1 | HR2 y recuadro azul; página 3
+  vertical con "Pasos/min" (7 ppm) sin cadenciómetro (R7.2 bien).
+- Fallos vistos: (1) página 3 en horizontal: botones parar/vuelta/pausa encima del indicador de páginas y
+  última fila de la rejilla cortada; (2) barra compacta de Ruta en horizontal con puntos, sin recuadro (R6.1).
+- Visto, de la spec 006 (no se toca sin pedirlo): en la página 3 en vertical el título "Vuelta manual M1" queda
+  bajo la flecha de volver.
+
+### Hecho (aprobado por el usuario)
+- `spec.md` R6.1 y `plan.md` §8/§10 actualizados antes del código.
+- `LandscapeLapsPage`: botones al pie de la columna izquierda (como la página 1); columna derecha con
+  `PAGE_INDICATOR_CLEARANCE`; botón "NUEVA VUELTA" 44 dp; casillas 22 sp, relleno 5 dp.
+  Columna izquierda: huecos, estado, tiempo (52 sp) y última vuelta en un bloque desplazable; botones fijos abajo
+  (con una vuelta cerrada la franja crece y, si no, recortaría los botones).
+- `CompactSensorRow` usa `SensorSlotBadge` (texto `slotSignalColor`, sin batería); `SensorSlotBadge` gana
+  `showBattery = true` por defecto.
+- Sin tocar Room, Gradle, `NavGraph.kt`, servicios ni lógica. Tests sin cambios (suite esperada 209).
+- Falta: compilar, instalar y capturas de página 3 en horizontal (sin y con una vuelta manual cerrada),
+  página 1 en horizontal con pasos > 0, Tabata con el recuadro y, si ANT+ responde, un recuadro verde en Ruta.
+
+### Prueba del usuario (1.6.134, instalada 18:07:24)
+- Tests (18:06): 209/209 verdes. Logcat sin cierres; ANT+ otra vez sin responder (ADAPTER_NOT_DETECTED), HR1 y
+  HR2 por BLE.
+- Página 3 horizontal: botones a la izquierda, indicador libre, "Pasos/min" 57 ppm. La 3.ª fila se ve con su
+  título pero el borde de abajo de las casillas queda recortado unos dp bajo "NUEVA VUELTA" (menor).
+- Página 1 horizontal con pasos (38): franja Pasos / Pasos/min / Zancada encima del indicador, sin solaparse.
+- Barra compacta horizontal con HR1/HR2 en recuadro azul; no toca la flecha de volver.
+- Tabata: HR1/HR2 en recuadro azul (BLE) con batería.
+- Sin ver: página 3 horizontal con una vuelta cerrada; recuadro verde ANT+ en Ruta/Tabata (ANT+ no respondió;
+  verde visto en Config en la 1.6.130).
+- El usuario confirma (ANT+ ya se veía bien antes) → `[x]` en `tasks.md` para los tres arreglos (§8, §9, §10).
+  Siguiente: T-06 cuando el usuario lo diga. Sin commit. Nada marcado `[x]` aún. Sin commit.
+
+---
+
 ## 2026-11-21 — Spec 007 · Ruta: un pulsómetro → tarjeta grande; cadencia o pasos/min (pendiente de prueba)
 
 ### Contexto

@@ -164,7 +164,19 @@ Los tres "pendientes vistos" en T-04/T-05. No es T-06 (que sigue sin empezar).
   queda y el número se ajusta a él con el mismo cálculo que en vertical, extraído a `MetricsGrid` (lo usan las
   dos orientaciones; en horizontal con relleno de tarjeta 10 dp). La franja de pasos va debajo, sin `weight`
   (se mide antes). Cálculo para el S22 (384 dp de alto en horizontal): filas de ≈ 100 dp con pasos → número
-  ≈ 39 sp y HR1 | HR2 ≈ 25 sp; sin pasos, ≈ 130 dp. La página 3 en horizontal se vio bien en T-05: sin cambios.
+  ≈ 39 sp y HR1 | HR2 ≈ 25 sp; sin pasos, ≈ 130 dp.
+- **Ruta horizontal, página 3 (visto en la prueba 1.6.132).** Los botones parar/vuelta/pausa
+  (`FreeRideControlsCompact`) iban al pie de la columna derecha, encima del indicador de páginas, y la última
+  fila de la rejilla (pasos, pasos/min, desnivel) quedaba cortada. Arreglo en `LandscapeLapsPage`, igual que la
+  página 1: los botones pasan al pie de la columna izquierda (bajo la última vuelta, que no llega al indicador)
+  y la columna derecha reserva `PAGE_INDICATOR_CLEARANCE` abajo. Para que quepan las 3 filas: botón "NUEVA
+  VUELTA" 48 → 44 dp y número de las casillas 26 → 22 sp (relleno 6 → 5 dp). La rejilla se sigue pudiendo
+  desplazar si no cupiera. Cálculo para el S22 (≈ 338 dp útiles): título 20 + rejilla ≈ 200 (filas ≈ 63 dp,
+  casilla ≈ 58) + botón 44 + márgenes 16 + 56 = 336.
+  Columna izquierda: con una vuelta cerrada la franja de la última vuelta crece (título + 2x2 ≈ 130 dp) y no
+  cabría con los botones; la parte de arriba (huecos, estado, tiempo, última vuelta) va en un bloque
+  desplazable que ocupa lo que queda y los botones quedan fijos abajo. Tiempo 56 → 52 sp y separación 10 → 6 dp
+  para que no haga falta desplazar: 24 + 20 + 70 + 130 + 18 = 262 ≤ 338 − 56 − 6.
 - **"Lápiz" en Config: descartado, no es un fallo** *(confirmado por el usuario 2026-11-21)*. Es el icono
   flotante del S Pen de Samsung (Air command), que el usuario usa a diario y le es imprescindible. No tiene nada que ver
   con la app: no se toca, ni en el código ni en el móvil, ni se vuelve a apuntar como pendiente.
@@ -195,13 +207,18 @@ Los tres "pendientes vistos" en T-04/T-05. No es T-06 (que sigue sin empezar).
 - Sin tocar Room, Gradle, `NavGraph.kt` ni el ciclo de vida de los servicios.
 
 ### 10. Señal por recuadro de color (R6.1; 2026-11-21, antes de T-06)
-- Solo `ui/components/SensorSlotBadge.kt`, que usan todas las pantallas (Tabata, Config, barra y tarjetas de
+- `ui/components/SensorSlotBadge.kt`, que usan todas las pantallas (Tabata, Config, barra y tarjetas de
   Ruta; Home lo heredará en T-06 con `SensorBar`). Ninguna pantalla cambia su llamada.
 - `SensorSlotBadge`: el texto del hueco va dentro de un recuadro redondeado (borde 1,5 dp + fondo del mismo color
   al 15 %): verde `0xFF66BB6A` ANT+, azul `0xFF42A5F5` BLE (los colores que ya tenía la etiqueta). Sin señal, el
   borde es transparente con el mismo relleno, para que nada salte de sitio al conectar. Se quita la etiqueta de
   texto "ANT+"/"BLE" (`ProtocolBadge`, sin otros usos). Batería sin cambios (al lado o debajo con `stacked`).
 - Lectores de pantalla: descripción "HR1, ANT+" / "HR1, BLE" / "HR1, sin señal".
+- **Barra compacta de Ruta en horizontal (visto en la prueba 1.6.132).** `CompactSensorRow` (páginas 1 y 3 en
+  horizontal) seguía con un punto de color por hueco, sin recuadro. Pasa a usar `SensorSlotBadge` con el
+  color de texto de la barra vertical (`slotSignalColor`) y sin batería (no cabe en la columna izquierda; antes
+  tampoco la tenía). Para ello `SensorSlotBadge` gana `showBattery: Boolean = true` (las llamadas actuales no
+  cambian).
 - Sin tocar lógica, sensores, servicios, Room, Gradle ni `NavGraph.kt`.
 
 ## Archivos
