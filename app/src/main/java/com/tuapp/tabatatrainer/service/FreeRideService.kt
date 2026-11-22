@@ -163,6 +163,7 @@ class FreeRideService : Service() {
         private const val NOTIFICATION_ID = 2001
         private const val CHANNEL_ID = "freeride_channel"
         private const val MAX_MAP_POINTS = 1000  // Máximo puntos para el mapa en memoria
+        private const val HR_STALE_MS = 5_000L   // un pulso más viejo no se graba (spec 007, R2.1)
     }
 
     @Inject lateinit var sensorManager: SensorManager
@@ -225,6 +226,9 @@ class FreeRideService : Service() {
     // Último valor de cada pulsómetro, para guardar 1 lectura por segundo
     @Volatile private var currentHr1: Int? = null
     @Volatile private var currentHr2: Int? = null
+    // Cuándo llegó ese valor: solo se graba si es reciente (spec 007, R2.1 ampliado tras el paseo del 2026-11-22)
+    @Volatile private var currentHr1Ms = 0L
+    @Volatile private var currentHr2Ms = 0L
     private val gpsPointsBuffer = mutableListOf<GpsPointEntity>()
 
     // Velocidad máxima de la vuelta manual y de la vuelta AUTO (cada 1 km)
@@ -383,7 +387,8 @@ class FreeRideService : Service() {
                     }
                     is HeartRateReading.Value -> {
                         Log.d(TAG, "$tag: Valor recibido: ${reading.bpm} bpm")
-                        if (slot == 0) currentHr1 = reading.bpm else currentHr2 = reading.bpm
+                        if (slot == 0) { currentHr1 = reading.bpm; currentHr1Ms = reading.timestamp }
+                        else { currentHr2 = reading.bpm; currentHr2Ms = reading.timestamp }
                         _stats.update {
                             if (slot == 0) it.copy(isHrScanning = false, isHrConnected = true, heartRate = reading.bpm)
                             else it.copy(isHr2Connected = true, heartRate2 = reading.bpm)
@@ -517,9 +522,14 @@ class FreeRideService : Service() {
     fun reconnectSensors() {
         Log.d(TAG, "🔄 Reconectando sensores...")
         // Solo sensores: el cronómetro de la ruta debe seguir corriendo
+        currentHr1 = null
+        currentHr2 = null
         stopSensorCollectors()
 
         serviceScope.launch {
+            // Reinicio real de las radios ANT+ y BLE (spec 007, R8.2): sin esto, volver a escuchar los huecos no
+            // reconectaba una banda perdida. Conserva huecos y señales ignoradas
+            sensorManager.resetFlows()
             delay(500)
             startSensorScanning()
         }
@@ -1020,11 +1030,13 @@ class FreeRideService : Service() {
     private fun saveSensorReading() {
         val sessionId = currentSessionId ?: return
         val s = _stats.value
+        val now = System.currentTimeMillis()
         val reading = SensorReadingEntity(
             sessionId = sessionId,
-            timestamp = System.currentTimeMillis(),
-            heartRate = currentHr1?.takeIf { it > 0 },
-            heartRate2 = currentHr2?.takeIf { it > 0 },
+            timestamp = now,
+            // Sin valor congelado (R2.1): un pulso de hace más de HR_STALE_MS no se graba
+            heartRate = currentHr1?.takeIf { it > 0 && now - currentHr1Ms < HR_STALE_MS },
+            heartRate2 = currentHr2?.takeIf { it > 0 && now - currentHr2Ms < HR_STALE_MS },
             cadence = s.cadence.takeIf { s.isCadenceConnected && it > 0f },
             phase = "FREE_RIDE",
             round = s.lapsCount + 1

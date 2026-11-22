@@ -8,6 +8,7 @@ import com.tuapp.tabatatrainer.sensor.HeartRateReading
 import com.tuapp.tabatatrainer.sensor.SensorManager
 import com.tuapp.tabatatrainer.sensor.SlotStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -116,6 +117,8 @@ class ConfigViewModel @Inject constructor(
                             Timber.e(e, "Error procesando lectura de HR en ConfigViewModel")
                         }
                     }
+            } catch (e: CancellationException) {
+                throw e   // salir de Config cancela el colector: no es un error (plan §12)
             } catch (e: Exception) {
                 Timber.e(e, "Error crítico en collector de HR")
                 _bleStatus.update { 
@@ -169,6 +172,8 @@ class ConfigViewModel @Inject constructor(
                             Timber.e(e, "Error procesando lectura de Cadence en ConfigViewModel")
                         }
                     }
+            } catch (e: CancellationException) {
+                throw e   // salir de Config cancela el colector: no es un error (plan §12)
             } catch (e: Exception) {
                 Timber.e(e, "Error crítico en collector de Cadence")
                 _bleStatus.update { 

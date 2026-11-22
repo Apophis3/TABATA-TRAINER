@@ -3,8 +3,6 @@ package com.tuapp.tabatatrainer.ui.components
 import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
@@ -20,17 +18,11 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /** Etiquetas de los huecos, en el mismo orden que [SensorBatteryViewModel.batteries] */
 val BATTERY_SLOT_LABELS = listOf("HR1", "HR2", "C1", "C2")
-
-/** Batería de HR1, HR2, C1, C2. Mismo ViewModel en toda la pantalla (se comparte por destino de navegación) */
-@Composable
-fun rememberSensorBatteries(): List<SensorBattery?> {
-    val batteries by hiltViewModel<SensorBatteryViewModel>().batteries.collectAsState()
-    return batteries
-}
 
 /** Muestra "Batería baja en HRx" una sola vez por sensor y sesión (pantallas de entrenamiento) */
 @Composable
@@ -38,6 +30,9 @@ fun BatteryLowWarnings() {
     val vm = hiltViewModel<SensorBatteryViewModel>()
     val context = LocalContext.current
     LaunchedEffect(vm) {
+        // Sin nadie que lea las baterías, `batteries` no se calcula y el aviso no sale nunca (desde T-04/T-05 Tabata
+        // y Ruta ya no las leían; plan §12): se leen aquí mientras la pantalla está abierta
+        launch { vm.batteries.collect { } }
         vm.lowWarnings.collect { Toast.makeText(context, "🔋 $it", Toast.LENGTH_LONG).show() }
     }
 }

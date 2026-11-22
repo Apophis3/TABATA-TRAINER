@@ -48,8 +48,17 @@ class PairingPolicy(
 
     fun reset() { safePair = null; safeStreak = 0 }
 
-    /** [signals]: señales conectadas de este tipo (frescas o no) */
-    fun evaluate(signals: List<SignalSnapshot>, lookup: PairingLookup): List<PairDecision> {
+    /**
+     * [signals]: señales conectadas de este tipo (frescas o no).
+     * [sessionPartners]: señal agrupada solo en la sesión → señales del otro protocolo de su grupo (R3.1). En la
+     * comparación por valores solo se compara con ellas: no hace de rival de las demás (dos bandas en el mismo pecho
+     * darían empate y la 2.ª esperaría 30 s). El recuento para guardar para siempre no cambia.
+     */
+    fun evaluate(
+        signals: List<SignalSnapshot>,
+        lookup: PairingLookup,
+        sessionPartners: Map<String, Set<String>> = emptyMap()
+    ): List<PairDecision> {
         val unpaired = signals.filter { lookup.partnerOf(kind, it.id) == null }
         val ants = unpaired.filter { it.isAnt }
         val bles = unpaired.filter { it.isBle }
@@ -79,6 +88,7 @@ class PairingPolicy(
         val diffs = HashMap<Pair<String, String>, Double>()
         for (a in freshAnts.filter(ready)) for (b in freshBles.filter(ready)) {
             if (lookup.isBlocked(kind, a.id, b.id)) continue
+            if (crossesSessionPair(a.id, b.id, sessionPartners)) continue
             diffs[a.id to b.id] = minLaggedAvgDiff(a.history, b.history, t.maxLag)
         }
         for ((pair, d) in diffs) {
@@ -90,6 +100,10 @@ class PairingPolicy(
         }
         return decisions
     }
+
+    /** Une una señal agrupada en la sesión con otra que no es su pareja (R3.1) */
+    private fun crossesSessionPair(antId: String, bleId: String, partners: Map<String, Set<String>>): Boolean =
+        partners[antId]?.let { bleId !in it } == true || partners[bleId]?.let { antId !in it } == true
 
     private fun varies(h: List<Int>) = h.isNotEmpty() && h.max() - h.min() >= t.minRange
 

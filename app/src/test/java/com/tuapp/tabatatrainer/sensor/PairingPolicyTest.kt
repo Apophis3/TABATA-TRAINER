@@ -27,8 +27,10 @@ class PairingPolicyTest {
     /** Ejecuta la política [ticks] segundos y devuelve todas las decisiones */
     private fun run(
         policy: PairingPolicy, book: DeviceBook, ticks: IntRange,
+        partners: Map<String, Set<String>> = emptyMap(),
         signals: (Int) -> List<SignalSnapshot>
-    ): List<Pair<Int, PairDecision>> = ticks.flatMap { tick -> policy.evaluate(signals(tick), book).map { tick to it } }
+    ): List<Pair<Int, PairDecision>> =
+        ticks.flatMap { tick -> policy.evaluate(signals(tick), book, partners).map { tick to it } }
 
     // --- Nombre ---------------------------------------------------------------------------
 
@@ -165,6 +167,35 @@ class PairingPolicyTest {
         assertTrue(d.isNotEmpty())
         assertTrue(d.all { it.second.antId == "ANT:B" && it.second.bleId == "BLE:B" })
         assertTrue(d.any { it.second.persistent })
+    }
+
+    // --- R3.1: una agrupación de sesión no estorba a la siguiente ------------------------------
+
+    /** Banda A ya agrupada en la sesión (ANT:A ↔ BLE:A) */
+    private val groupedA = mapOf("ANT:A" to setOf("BLE:A"), "BLE:A" to setOf("ANT:A"))
+
+    @Test
+    fun `con la primera banda agrupada en la sesion la segunda indistinguible se agrupa sin esperar`() {
+        // Mismo caso que "dos bandas indistinguibles no se agrupan", pero con A ya agrupada: B no ve empate
+        val d = run(PairingPolicy(HR, t), DeviceBook(), 1..60, groupedA) { tick ->
+            listOf(
+                sig("ANT:A", hr, tick), sig("BLE:A", delayed(hr, 2), tick),
+                sig("ANT:B", hr, tick), sig("BLE:B", delayed(hr, 1), tick),
+            )
+        }
+        val pairs = setOf("ANT:A" to "BLE:A", "ANT:B" to "BLE:B")
+        assertTrue(d.toString(), d.all { (it.second.antId to it.second.bleId) in pairs })   // nunca cruzadas
+        assertEquals(t.minSamples, d.first { it.second.antId == "ANT:B" }.first)            // en cuanto hay muestras
+        assertTrue(d.none { it.second.persistent })                                          // dos bandas: solo sesión
+    }
+
+    @Test
+    fun `una banda agrupada en la sesion y sola a la vista se sigue guardando tras la ventana`() {
+        val partners = mapOf("ANT:1" to setOf("BLE:A"), "BLE:A" to setOf("ANT:1"))
+        val d = run(PairingPolicy(HR, t), DeviceBook(), 1..40, partners) { tick ->
+            listOf(sig("ANT:1", hr, tick), sig("BLE:A", delayed(hr, 3), tick))
+        }
+        assertEquals(t.safeTicks, d.first { it.second.persistent }.first)
     }
 
     // --- Desfase (antes en HrDeviceBookTest) -----------------------------------------------------

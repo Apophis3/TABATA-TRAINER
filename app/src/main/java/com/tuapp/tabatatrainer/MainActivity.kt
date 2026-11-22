@@ -13,9 +13,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import com.tuapp.tabatatrainer.navigation.NavGraph
+import com.tuapp.tabatatrainer.ui.devices.NewDevicePrompt
 import com.tuapp.tabatatrainer.ui.theme.TabataTrainerTheme
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -90,6 +92,8 @@ class MainActivity : ComponentActivity() {
                     // este padding evita que la barra de estado/navegación tape el contenido
                     Box(modifier = Modifier.safeDrawingPadding()) {
                         NavGraph()
+                        // Aparato nuevo: "¿Es tuyo?" encima de cualquier pantalla (spec 007, R11)
+                        NewDevicePrompt(Modifier.align(Alignment.TopCenter))
                     }
                 }
             }

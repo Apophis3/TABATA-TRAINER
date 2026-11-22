@@ -68,6 +68,19 @@ usuario confirme la anterior con evidencia. El agente **no** ejecuta Gradle ni `
   al tocarla en Home, Tabata, Ruta (también en marcha) y Config (R8.1–R8.3); la flecha sigue reconectando.
   *Código hecho 2026-11-21 (aprobado por el usuario; detalle en `plan.md` §11, notas en §11.9). Pendiente de
   prueba: suite esperada 227 (209 + 18) y la evidencia de `plan.md` §11.8.*
+- [ ] Arreglos tras la prueba parcial de T-06 *(pedidos por el usuario 2026-11-21; `spec.md` R3.1, `plan.md`
+  §12; fuera de T-06 y T-07)*: la 2.ª banda ya no espera 30 s por "empate" con la 1.ª agrupada en la sesión;
+  página 3 de Ruta en horizontal sin el borde de la 3.ª fila cortado; sin el "Error crítico" falso al salir de
+  Config; borrado `rememberSensorBatteries`; vuelve el aviso "Batería baja" en Tabata y Ruta (perdido en T-04/T-05). *Código hecho 2026-11-21; pendiente de prueba (suite esperada 230).*
+- [ ] Arreglos tras el paseo del 2026-11-22 *(pedidos por el usuario; `spec.md` R2.1 ampliado, R8.2 aclarado, R10;
+  `plan.md` §13; fuera de T-06 y T-07)*: sin valor congelado grabado (HR2 grabó 142 fijo 36 min); ANT+ en "buscando"
+  > 30 s se da por perdido y libera su canal; Reconectar reinicia de verdad las radios en Tabata y Ruta (conserva
+  huecos); "No es mío" en la hoja para ignorar una señal ajena en la sesión, con "Volver a usar". *Código hecho
+  2026-11-22; pendiente de prueba (suite esperada 236).*
+- [ ] Aparato nuevo pregunta antes de usarse *(pedido por el usuario 2026-11-22; `spec.md` R11, `plan.md` §14;
+  fuera de T-06 y T-07)*: un pulsómetro o cadenciómetro sin guardar no ocupa hueco; tras 15 s oyéndose sale un aviso
+  arriba "¿Es tuyo?" con "Sí, usar" (lo guarda) y "No es mío" (lo ignora). *Código hecho 2026-11-22; pendiente de
+  prueba real; tests 243/243 en verde (1.6.143, 2026-11-22 17:39).*
 - [ ] T-07 **Validación real (usuario).** Una banda dual; dos bandas; cadenciómetro dual; caída/vuelta ANT+.
   Incluye lo aplazado: cadencia real de T-03 (C1 al pedalear, 0 rpm en ~3 s al parar sin perder hueco, C1/C2 con
   dos aparatos) y, de T-02, HR2 apagado en Home al quitar una banda.

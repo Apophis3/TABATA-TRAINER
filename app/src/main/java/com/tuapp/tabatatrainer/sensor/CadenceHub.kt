@@ -72,6 +72,8 @@ class CadenceHub @Inject constructor(
         private const val HANDOFF_MAX_DIFF = 15    // relevo sin solapamiento: diferencia máxima con el último rpm del hueco
         private const val RADIO_STOP_DELAY_MS = 5_000L
         private const val SLOT_MEMORY_MS = 55_000L
+        private const val ANT_LOST_MS = 30_000L          // ANT+ "buscando" más de esto: perdido (R2.1, paseo 2026-11-22)
+        private const val ASK_NEW_MS = 15_000L           // aparato nuevo: se pregunta tras este tiempo con dato (R11)
         private val CSC_SERVICE = UUID.fromString("00001816-0000-1000-8000-00805f9b34fb")
         private val CSC_MEASUREMENT = UUID.fromString("00002A5B-0000-1000-8000-00805f9b34fb")
         private val CCC_DESCRIPTOR = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
@@ -85,7 +87,7 @@ class CadenceHub @Inject constructor(
     val devices: StateFlow<Map<String, CadDevice>> = _devices.asStateFlow()
 
     private val pairing = PairingPolicy(KIND, PairingThresholds.CADENCE)
-    private val allocator = DualSlotAllocator(KIND, registry, "C", HANDOFF_MAX_DIFF, SLOTS) { Timber.d("🚴 $it") }
+    private val allocator = DualSlotAllocator(KIND, registry, "C", HANDOFF_MAX_DIFF, SLOTS, askNewMs = ASK_NEW_MS) { Timber.d("🚴 $it") }
     private val history = HashMap<String, ArrayDeque<Int>>()
 
     private val slotFlows = List(SLOTS) {
@@ -110,6 +112,17 @@ class CadenceHub @Inject constructor(
     // Señales vistas con su aparato y su hueco, para la hoja "Dispositivos" (spec 007, T-06). Vacío con las radios paradas
     private val _signals = MutableStateFlow<List<VisibleSignal>>(emptyList())
     val signals: StateFlow<List<VisibleSignal>> = _signals.asStateFlow()
+
+    // Señales ignoradas en esta sesión de la app (id -> etiqueta), "No es mío" en la hoja (spec 007, R10)
+    private val _ignored = MutableStateFlow<Map<String, String>>(emptyMap())
+    val ignored: StateFlow<Map<String, String>> = _ignored.asStateFlow()
+
+    // Aparatos nuevos por los que preguntar "¿Es tuyo?" (spec 007, R11). Vacío con las radios paradas
+    private val _toAsk = MutableStateFlow<List<NewDeviceAsk>>(emptyList())
+    val toAsk: StateFlow<List<NewDeviceAsk>> = _toAsk.asStateFlow()
+
+    /** Sin cerrojo: lo usan también los avisos de las radios */
+    private fun isIgnored(id: String) = id in _ignored.value
 
     init {
         scope.launch {
@@ -165,6 +178,7 @@ class CadenceHub @Inject constructor(
         slotStatuses.forEachIndexed { i, s -> s.value = SlotStatus(i, deviceKey = allocator.groupIn(i)) }
         slotFlows.forEach { it.resetReplayCache() }
         _signals.value = emptyList()
+        _toAsk.value = emptyList()
     }
 
     /** Olvida el reparto de huecos y los vínculos de sesión (solo con las radios paradas) */
@@ -187,10 +201,41 @@ class CadenceHub @Inject constructor(
         Timber.d("🚴 $antId y $bleId separados en la sesión")
     }
 
-    /** Fuerza una reconexión completa (botón "reconectar") */
+    /**
+     * "Reconectar" (R8.2): reinicia las radios ANT+ y BLE de verdad, pero conserva el reparto de huecos (R9) y las
+     * señales ignoradas (R10)
+     */
+    @Synchronized
     fun restart() {
-        stop()
+        Timber.d("🚴 CadenceHub: reconexión (huecos e ignoradas se conservan)")
+        stopRadios()
         if (slotFlows.any { it.subscriptionCount.value > 0 }) start()
+    }
+
+    /** "No es mío" (R10): estas señales sueltan su hueco y dejan de usarse hasta cerrar la app o [unignore] */
+    @Synchronized
+    fun ignore(ids: Map<String, String>) {
+        if (ids.isEmpty()) return
+        allocator.ignore(ids)
+        _ignored.value = allocator.ignoredSignals()
+        // Canales y conexiones se cierran en el siguiente tick
+    }
+
+    /** "Sí, usar" en el aviso de aparato nuevo (R11): se guarda en el registro y entra en el siguiente tick */
+    @Synchronized
+    fun approve(id: String, name: String) {
+        registry.remember(KIND, id, name)
+        allocator.approve(id)
+        _toAsk.value = allocator.asking()
+        Timber.d("🚴 CadenceHub: $id ($name) aprobado y guardado")
+    }
+
+    /** "Volver a usar" (R10) */
+    @Synchronized
+    fun unignore(id: String) {
+        allocator.unignore(id)
+        _ignored.value = allocator.ignoredSignals()
+        if (running && id.startsWith("ANT:")) antRadio.request()
     }
 
     // ------------------------------------------------------------------------
@@ -198,6 +243,7 @@ class CadenceHub @Inject constructor(
     // ------------------------------------------------------------------------
 
     private fun upsert(id: String, f: (CadDevice?) -> CadDevice) {
+        if (isIgnored(id)) return
         _devices.update { it + (id to f(it[id])) }
     }
 
@@ -234,6 +280,8 @@ class CadenceHub @Inject constructor(
     @Synchronized
     private fun tick() {
         val now = System.currentTimeMillis()
+        dropIgnored()
+        checkAntLost(now)
         zeroStopped(now)
         val devs = _devices.value
         updateHistory(devs, now)
@@ -244,6 +292,7 @@ class CadenceHub @Inject constructor(
         }
         val statuses = allocator.tick(signals, now)
         _signals.value = allocator.describe(signals)
+        _toAsk.value = allocator.asking()
         for (st in statuses) {
             val i = st.slot
             val changed = st.sourceId != slotStatuses[i].value.sourceId
@@ -289,7 +338,8 @@ class CadenceHub @Inject constructor(
         val signals = devs.values.filter { it.connected }.map {
             SignalSnapshot(it.id, it.name, it.isFresh(now), history[it.id]?.toList().orEmpty())
         }
-        for (p in pairing.evaluate(signals, registry)) {
+        val partners = allocator.sessionPartners(signals.map { it.id })
+        for (p in pairing.evaluate(signals, registry, partners)) {
             val a = devs[p.antId] ?: continue
             val b = devs[p.bleId] ?: continue
             if (p.persistent) {
@@ -316,7 +366,8 @@ class CadenceHub @Inject constructor(
     override val antType: DeviceType = DeviceType.BIKE_CADENCE
     override val antTag = "🚴"
     override fun wantsAntSearch() = running && antHandles.size < SLOTS
-    override fun isAntKnown(number: Int) = antHandles.containsKey(number) || antConnecting.contains(number)
+    override fun isAntKnown(number: Int) =
+        antHandles.containsKey(number) || antConnecting.contains(number) || isIgnored("ANT:$number")   // ignorada: no se conecta
     override fun onAntFound(number: Int, displayName: String?) = connectAnt(number, displayName)
 
     private fun startAnt() {
@@ -325,7 +376,7 @@ class CadenceHub @Inject constructor(
     }
 
     private fun connectAnt(number: Int, displayName: String?) {
-        if (!running || antHandles.containsKey(number) || !antConnecting.add(number)) return
+        if (!running || isIgnored("ANT:$number") || antHandles.containsKey(number) || !antConnecting.add(number)) return
         if (!antRadio.beginConnect(this, number)) { antConnecting.remove(number); return }
         val id = "ANT:$number"
         val resultReceiver = AntPluginPcc.IPluginAccessResultReceiver<AntPlusBikeCadencePcc> { pcc, code, _ ->
@@ -352,14 +403,7 @@ class CadenceHub @Inject constructor(
             }
             antRadio.endConnect(this@CadenceHub, number)
         }
-        val stateReceiver = AntPluginPcc.IDeviceStateChangeReceiver { state ->
-            if (state == DeviceState.DEAD) {
-                Timber.w("🚴 ANT+ $number: perdido, se volverá a buscar")
-                upsert(id) { (it ?: CadDevice(id, displayName ?: id, "ANT+")).copy(connected = false, rpm = 0) }
-                antHandles.remove(number)?.close()
-                if (running) antRadio.request(AntRadio.RETRY_MS)
-            }
-        }
+        val stateReceiver = AntPluginPcc.IDeviceStateChangeReceiver { state -> onAntState(number, displayName, state) }
         scope.launch(Dispatchers.Main) {
             try {
                 antRadio.awaitClosed()   // la búsqueda se cierra en segundo plano: radio libre antes de pedir acceso
@@ -380,6 +424,59 @@ class CadenceHub @Inject constructor(
         antHandles.values.forEach { try { it.close() } catch (_: Exception) {} }
         antHandles.clear()
         antConnecting.clear()
+        antSearchingSince.clear()
+    }
+
+    // Canales ANT+ en "buscando" (el aparato no se oye) y desde cuándo
+    private val antSearchingSince = ConcurrentHashMap<Int, Long>()
+
+    /** Estado de un canal ANT+: "muerto", o "buscando" más de [ANT_LOST_MS], es perdido (R2.1, paseo 2026-11-22) */
+    private fun onAntState(number: Int, displayName: String?, state: DeviceState) {
+        when (state) {
+            DeviceState.DEAD -> onAntLost(number, displayName, "perdido")
+            DeviceState.SEARCHING ->
+                if (antHandles.containsKey(number) && antSearchingSince.putIfAbsent(number, System.currentTimeMillis()) == null)
+                    Timber.d("🚴 ANT+ $number: buscando (no se oye)")
+            DeviceState.TRACKING ->
+                if (antSearchingSince.remove(number) != null) Timber.d("🚴 ANT+ $number: se oye de nuevo")
+            else -> {}
+        }
+    }
+
+    /** Cada segundo: un canal ANT+ que lleva [ANT_LOST_MS] buscando se da por perdido (no siempre llega a "muerto") */
+    private fun checkAntLost(now: Long) {
+        for ((n, since) in antSearchingSince) {
+            if (now - since >= ANT_LOST_MS) onAntLost(n, null, "sin señal ${ANT_LOST_MS / 1000} s")
+        }
+    }
+
+    /** Señal ANT+ perdida: canal cerrado y se vuelve a buscar (si el aparato sigue cerca, se reconecta) */
+    private fun onAntLost(number: Int, displayName: String?, reason: String) {
+        antSearchingSince.remove(number)
+        if (!antHandles.containsKey(number)) return   // ya cerrado (p. ej. "muerto" tras cerrarlo nosotros)
+        val id = "ANT:$number"
+        Timber.w("🚴 ANT+ $number: $reason, se volverá a buscar")
+        upsert(id) { (it ?: CadDevice(id, displayName ?: id, "ANT+")).copy(connected = false, rpm = 0) }
+        antHandles.remove(number)?.let { h -> try { h.close() } catch (_: Exception) {} }
+        if (running) antRadio.request(AntRadio.RETRY_MS)
+    }
+
+    /** Cierra canales ANT+ y conexiones BLE de señales ignoradas y las quita de la lista (R10) */
+    private fun dropIgnored() {
+        val ign = _ignored.value
+        if (ign.isEmpty()) return
+        for (n in antHandles.keys.toList()) if ("ANT:$n" in ign) {
+            antSearchingSince.remove(n)
+            antHandles.remove(n)?.let { h -> try { h.close() } catch (_: Exception) {} }
+            Timber.d("🚴 ANT+ $n: ignorada, canal cerrado")
+            antRadio.request()   // canal libre: seguir buscando
+        }
+        for ((addr, g) in gatts.entries.toList()) if ("BLE:$addr" in ign) {
+            gatts.remove(addr, g)
+            try { g.disconnect(); g.close() } catch (_: Exception) {}
+            Timber.d("🚴 BLE $addr: ignorada, desconectada")
+        }
+        if (_devices.value.keys.any { it in ign }) _devices.update { it - ign.keys }
     }
 
     // ------------------------------------------------------------------------
@@ -411,7 +508,7 @@ class CadenceHub @Inject constructor(
         val cb = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
                 val device = result.device
-                if (!gatts.containsKey(device.address)) {
+                if (!gatts.containsKey(device.address) && !isIgnored("BLE:${device.address}")) {
                     val name = result.scanRecord?.deviceName ?: safeName(device) ?: "BLE ${device.address.takeLast(5)}"
                     connectBle(device, name)
                 }
@@ -439,7 +536,7 @@ class CadenceHub @Inject constructor(
 
     @SuppressLint("MissingPermission")
     private fun connectBle(device: BluetoothDevice, name: String) {
-        if (!running) return
+        if (!running || isIgnored("BLE:${device.address}")) return
         val id = "BLE:${device.address}"
         val callback = object : BluetoothGattCallback() {
             override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {

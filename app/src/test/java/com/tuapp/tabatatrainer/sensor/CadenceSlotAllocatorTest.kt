@@ -66,11 +66,12 @@ class CadenceSlotAllocatorTest {
     }
 
     @Test
-    fun `ANT conectada sin datos (biela parada) conserva el hueco`() {
+    fun `ANT conectada sin datos conserva el hueco pero no da valor (R2_1)`() {
+        // Biela parada con paquetes es 0 rpm fresco (test anterior); aquí no llega ningún paquete en 30 s
         step(ant("1"))
         val st = step(ant("1", v = 0, fresh = false), seconds = 30)
         assertEquals("ANT:1", st[0].deviceKey)
-        assertEquals("ANT:1", st[0].sourceId)
+        assertNull("sin dato reciente el hueco no da valor congelado", st[0].sourceId)
     }
 
     @Test

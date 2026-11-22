@@ -48,6 +48,17 @@ data class VisibleSignal(
     val protocol: String get() = if (isAnt) "ANT+" else "BLE"
 }
 
+/** Aparato nuevo que espera la aprobación del usuario para usarse (spec 007, R11) */
+data class NewDeviceAsk(
+    val kind: SensorKind,
+    val id: String,
+    val name: String,
+    val isAnt: Boolean,
+    val value: Int
+) {
+    val protocol: String get() = if (isAnt) "ANT+" else "BLE"
+}
+
 /**
  * Reparto de huecos para aparatos de doble señal (spec 007, T-02). Lógica pura, sin Android, común a pulso y
  * cadencia. Cada segundo recibe las señales vistas y decide qué aparato ocupa cada hueco y qué señal lo alimenta.
@@ -64,6 +75,12 @@ data class VisibleSignal(
  * 5. Fuente del hueco: ANT+ con dato > BLE con dato > ANT+ conectado > cualquiera conectado.
  * 6. Relevo sin solapamiento: si el aparato de un hueco cae por un protocolo y aparece un desconocido por el
  *    otro con valor parecido, hereda el hueco (vínculo solo de sesión).
+ * 7. Sin valor congelado (R2.1): una fuente conectada sin dato reciente se mantiene [staleHoldMs] y después el hueco
+ *    se queda sin fuente (sin valor) hasta el siguiente dato, sin perder su aparato.
+ * 8. Señales ignoradas (R10): no cuentan para nada; ignorarlas suelta su hueco. Duran hasta [unignore], también
+ *    tras [clear].
+ * 9. Aparato nuevo (R11, con [askNewMs]): un aparato sin ficha en el registro ni aprobado no recibe hueco; tras
+ *    [askNewMs] seguidos con dato se pregunta al usuario ([asking]); [approve] lo deja entrar.
  */
 class DualSlotAllocator(
     private val kind: SensorKind,
@@ -73,6 +90,8 @@ class DualSlotAllocator(
     private val slots: Int = 2,
     private val quarantineMs: Long = 30_000L,
     private val orphanAntGraceMs: Long = 60_000L, // un hueco ANT+ caído no pasa a un aparato solo-BLE antes de esto
+    private val staleHoldMs: Long = 3_000L,       // fuente conectada sin dato: se mantiene este tiempo (además de los 5 s de frescura)
+    private val askNewMs: Long? = null,           // R11: un aparato nuevo pregunta tras este tiempo con dato (null = entra sin preguntar)
     private val log: (String) -> Unit = {}
 ) {
     // Vínculos solo de esta sesión (agrupado por valores, relevo): id -> grupo
@@ -80,10 +99,19 @@ class DualSlotAllocator(
     private val quarantineSince = HashMap<String, Long>()
     private val orphanSince = HashMap<Int, Long>()
 
+    // Señales ignoradas por el usuario (R10): id -> etiqueta para la hoja
+    private val ignored = LinkedHashMap<String, String>()
+
+    // R11: señales aprobadas en esta sesión, aparatos nuevos con dato desde cuándo y los que ya hay que preguntar
+    private val approved = HashSet<String>()
+    private val askSince = HashMap<String, Long>()
+    private var toAsk: List<NewDeviceAsk> = emptyList()
+
     // Hueco -> grupo (clave del registro si está emparejado; si no, el id de una de sus señales)
     private val slotGroup = arrayOfNulls<String>(slots)
     private val slotSource = arrayOfNulls<String>(slots)
     private val slotLastValue = IntArray(slots)
+    private val staleSince = LongArray(slots)     // desde cuándo la fuente del hueco no tiene dato (0 = tiene)
 
     // --- Consultas -----------------------------------------------------------------------------
 
@@ -106,9 +134,77 @@ class DualSlotAllocator(
 
     @Synchronized fun leaveSession(vararg ids: String) { ids.forEach { sessionTwins.remove(it) } }
 
+    // --- Señales ignoradas (R10) -----------------------------------------------------------------
+
+    @Synchronized fun isIgnored(id: String) = id in ignored
+
+    /** Señales ignoradas (id -> etiqueta), en el orden en que se ignoraron */
+    @Synchronized fun ignoredSignals(): Map<String, String> = LinkedHashMap(ignored)
+
+    /**
+     * Ignora estas señales (id -> etiqueta): sueltan en el acto el hueco de su aparato y sus vínculos de sesión, y dejan
+     * de contar en [tick] y [describe]. No las borra [clear].
+     */
+    @Synchronized
+    fun ignore(ids: Map<String, String>) {
+        if (ids.isEmpty()) return
+        val groups = ids.keys.map { groupOf(it) }.toSet() + ids.keys
+        for (i in 0 until slots) {
+            val g = slotGroup[i] ?: continue
+            if (g !in groups) continue
+            slotGroup[i] = null; slotSource[i] = null; slotLastValue[i] = 0; staleSince[i] = 0L
+            orphanSince.remove(i)
+            log("$label${i + 1}: libre (señal ignorada)")
+        }
+        sessionTwins.entries.removeAll { (id, g) -> id in ids || g in ids }
+        quarantineSince.keys.removeAll(groups)
+        askSince.keys.removeAll(groups)
+        toAsk = toAsk.filter { it.id !in ids && groupOf(it.id) !in groups }
+        ignored.putAll(ids)
+        log("Ignoradas: ${ids.values.joinToString()}")
+    }
+
+    /** "Volver a usar": la señal cuenta otra vez desde el siguiente tick */
+    @Synchronized
+    fun unignore(id: String) {
+        ignored.remove(id)?.let { log("Vuelve a usarse: $it") }
+    }
+
+    // --- Aparatos nuevos (R11) --------------------------------------------------------------------
+
+    /** Aparatos nuevos por los que hay que preguntar (calculado en cada [tick]) */
+    @Synchronized fun asking(): List<NewDeviceAsk> = toAsk
+
+    /** "Sí, usar": la señal (y su aparato) entra con las reglas de siempre desde el siguiente tick */
+    @Synchronized
+    fun approve(id: String) {
+        if (!approved.add(id)) return
+        askSince.remove(groupOf(id))
+        toAsk = toAsk.filter { it.id != id }
+        log("$id aprobado por el usuario")
+    }
+
+    /**
+     * Señales agrupadas solo en la sesión → señales del otro protocolo de su mismo grupo, entre [ids] (las conectadas).
+     * Las emparejadas en el registro no cuentan. Para que el emparejado no las use de rival (R3.1).
+     */
+    @Synchronized
+    fun sessionPartners(ids: Collection<String>): Map<String, Set<String>> {
+        val loose = ids.filter { directory.pairKeyOf(kind, it) == null }
+        val result = HashMap<String, Set<String>>()
+        for ((_, members) in loose.groupBy { groupOf(it) }) {
+            for (id in members) {
+                val isAnt = id.startsWith(ANT_PREFIX)
+                val others = members.filter { it.startsWith(ANT_PREFIX) != isAnt }.toSet()
+                if (others.isNotEmpty()) result[id] = others
+            }
+        }
+        return result
+    }
+
     /** Señales vistas con su aparato y su hueco (para la hoja "Dispositivos") */
     @Synchronized
-    fun describe(signals: List<SignalState>): List<VisibleSignal> = signals.map { s ->
+    fun describe(signals: List<SignalState>): List<VisibleSignal> = signals.filter { it.id !in ignored }.map { s ->
         val g = groupOf(s.id)
         VisibleSignal(
             kind = kind, id = s.id, name = s.name, isAnt = s.isAnt, value = s.value, connected = s.connected,
@@ -123,11 +219,11 @@ class DualSlotAllocator(
 
     /** Radios paradas: se olvida la fuente y las esperas, pero se conserva qué aparato va en cada hueco */
     @Synchronized fun pause() {
-        quarantineSince.clear(); orphanSince.clear()
-        for (i in 0 until slots) slotSource[i] = null
+        quarantineSince.clear(); orphanSince.clear(); askSince.clear(); toAsk = emptyList()
+        for (i in 0 until slots) { slotSource[i] = null; staleSince[i] = 0L }
     }
 
-    /** Olvida todo lo de la sesión (los aparatos guardados en el registro no se tocan) */
+    /** Olvida todo lo de la sesión (los aparatos guardados en el registro no se tocan; ignoradas y aprobadas siguen) */
     @Synchronized fun clear() {
         pause()
         sessionTwins.clear()
@@ -137,7 +233,8 @@ class DualSlotAllocator(
     // --- Reparto -------------------------------------------------------------------------------------
 
     @Synchronized
-    fun tick(signals: List<SignalState>, now: Long): List<SlotStatus> {
+    fun tick(all: List<SignalState>, now: Long): List<SlotStatus> {
+        val signals = if (ignored.isEmpty()) all else all.filter { it.id !in ignored }
         val byId = signals.associateBy { it.id }
         detectHandoffs(signals, now)
         val live = signals.filter { it.connected }.map { groupOf(it.id) }.toSet()
@@ -145,7 +242,7 @@ class DualSlotAllocator(
         mergeSlots()
         applyPreferredSlots(signals, live)
         assignPending(signals, byId, live, now)
-        return (0 until slots).map { pickSource(it, signals) }
+        return (0 until slots).map { pickSource(it, signals, now) }
     }
 
     /** Regla 1: un hueco cuyo aparato se ha agrupado pasa a la clave del aparato; sin duplicados */
@@ -184,8 +281,20 @@ class DualSlotAllocator(
         }
         val pending = live.filter { it !in slotGroup }.sortedBy { if (hasAnt(it, signals)) 0 else 1 }
         quarantineSince.keys.retainAll(pending.toSet())
+        val waiting = HashSet<String>()
         for (g in pending) {
             if (inQuarantine(g, signals, byId, live, now)) continue
+            if (askNewMs != null && !isTrusted(g, signals)) {
+                // R11: sin hueco hasta que el usuario lo apruebe; cuenta el tiempo seguido con dato
+                if (signals.any { it.fresh && groupOf(it.id) == g }) {
+                    waiting += g
+                    askSince.getOrPut(g) {
+                        log("${nameOf(g, signals)}: nuevo, sin aprobar; se preguntará si sigue ${askNewMs / 1000} s")
+                        now
+                    }
+                }
+                continue
+            }
             // La espera ya cumplida se conserva mientras siga sin hueco: borrarla aquí la reiniciaba cada 30 s
             // y un aparato sin hueco libre nunca llegaba a usar el que se libera después
             val slot = slotFor(g, signals, live, now) ?: continue
@@ -196,7 +305,18 @@ class DualSlotAllocator(
             log("$label${slot + 1}: asignado a ${nameOf(g, signals)}" +
                 (displaced?.let { " (sustituye a ${nameOf(it, signals)}${if (it in live) ", ANT+ preferente" else ""})" } ?: ""))
         }
+        askSince.keys.retainAll(waiting)
+        toAsk = if (askNewMs == null) emptyList() else askSince.filter { (_, since) -> now - since >= askNewMs }.keys
+            .mapNotNull { g ->
+                signals.filter { groupOf(it.id) == g && it.fresh }.minByOrNull { if (it.isAnt) 0 else 1 }
+                    ?.let { NewDeviceAsk(kind, it.id, it.name, it.isAnt, it.value) }
+            }
+            .sortedBy { if (it.isAnt) 0 else 1 }
     }
+
+    /** R11: aparato guardado en el registro (con alguna de sus señales) o aprobado en esta sesión */
+    private fun isTrusted(g: String, signals: List<SignalState>): Boolean =
+        idsOf(g, signals).any { it in approved || directory.deviceOf(kind, it) != null }
 
     private fun slotFor(g: String, signals: List<SignalState>, live: Set<String>, now: Long): Int? {
         val own = preferredOf(g, signals)
@@ -219,7 +339,9 @@ class DualSlotAllocator(
 
         // ANT+ desplaza a BLE: con tantos aparatos ANT+ como huecos, el BLE sobra (es la otra cara de uno de ellos)
         if (!gAnt) return null
-        val antGroups = (live + slotGroup.filterNotNull()).count { hasAnt(it, signals) }
+        // Un aparato sin aprobar (R11) no cuenta: no puede echar a un BLE propio
+        val antGroups = (live.filter { askNewMs == null || it in slotGroup || isTrusted(it, signals) } + slotGroup.filterNotNull())
+            .toSet().count { hasAnt(it, signals) }
         if (antGroups < slots) return null
         return (0 until slots).firstOrNull { i ->
             val o = slotGroup[i]
@@ -227,13 +349,23 @@ class DualSlotAllocator(
         }
     }
 
-    /** Regla 5: fuente del hueco */
-    private fun pickSource(i: Int, signals: List<SignalState>): SlotStatus {
+    /** Reglas 5 y 7: fuente del hueco */
+    private fun pickSource(i: Int, signals: List<SignalState>, now: Long): SlotStatus {
         val g = slotGroup[i]
         val members = if (g == null) emptyList() else signals.filter { groupOf(it.id) == g }
-        val best = members.filter { it.fresh }.minByOrNull { if (it.isAnt) 0 else 1 }
-            ?: members.firstOrNull { it.connected && it.isAnt }
-            ?: members.firstOrNull { it.connected }
+        val fresh = members.filter { it.fresh }.minByOrNull { if (it.isAnt) 0 else 1 }
+        val stale = members.firstOrNull { it.connected && it.isAnt } ?: members.firstOrNull { it.connected }
+        val best = when {
+            fresh != null -> { staleSince[i] = 0L; fresh }
+            stale == null -> { staleSince[i] = 0L; null }
+            else -> {
+                if (staleSince[i] == 0L) staleSince[i] = now
+                if (now - staleSince[i] < staleHoldMs) stale else {
+                    if (slotSource[i] != null) log("$label${i + 1}: ${stale.name} (${stale.protocol}) sin dato reciente, el hueco deja de dar valor")
+                    null
+                }
+            }
+        }
         if (best?.id != slotSource[i]) log("$label${i + 1}: ${best?.let { "${it.name} (${it.protocol})" } ?: "—"}")
         slotSource[i] = best?.id
         if (best != null && best.value > 0) slotLastValue[i] = best.value

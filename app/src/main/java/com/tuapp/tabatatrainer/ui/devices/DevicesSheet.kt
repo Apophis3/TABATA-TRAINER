@@ -125,6 +125,7 @@ fun DevicesSheet(
             kindState.cards.forEach { card ->
                 DeviceCardView(card, kindState.cards, liveSession, viewModel)
             }
+            if (kindState.ignored.isNotEmpty()) IgnoredPanel(kind, kindState.ignored, viewModel)
         }
     }
 }
@@ -183,6 +184,7 @@ private fun DeviceCardView(card: DeviceCard, cards: List<DeviceCard>, liveSessio
     var renaming by remember { mutableStateOf(false) }
     var choosingLink by remember { mutableStateOf(false) }
     var confirmForget by remember { mutableStateOf(false) }
+    var confirmIgnore by remember { mutableStateOf(false) }
     val candidates = linkCandidates(card, cards)
 
     Column(
@@ -270,6 +272,9 @@ private fun DeviceCardView(card: DeviceCard, cards: List<DeviceCard>, liveSessio
             if (card.device != null) {
                 TextButton(onClick = { confirmForget = true }) { Text("Olvidar", color = Danger) }
             }
+            if (card.signals.isNotEmpty()) {
+                TextButton(onClick = { confirmIgnore = true }) { Text("No es mío", color = Danger) }
+            }
         }
     }
 
@@ -303,6 +308,24 @@ private fun DeviceCardView(card: DeviceCard, cards: List<DeviceCard>, liveSessio
             containerColor = SheetBackground
         )
     }
+    if (confirmIgnore) {
+        AlertDialog(
+            onDismissRequest = { confirmIgnore = false },
+            title = { Text("¿«${card.title}» no es tuyo?", color = Color.White) },
+            text = {
+                Text(
+                    "Deja de usarse mientras la app siga abierta: suelta su hueco, no se graba y no se vuelve a " +
+                        "conectar. Se deshace en «Ignorados» (Volver a usar) o al cerrar la app.",
+                    color = TextSecondary
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { vm.ignore(card); confirmIgnore = false }) { Text("No es mío", color = Danger) }
+            },
+            dismissButton = { TextButton(onClick = { confirmIgnore = false }) { Text("Cancelar", color = TextSecondary) } },
+            containerColor = SheetBackground
+        )
+    }
     if (confirmForget) {
         AlertDialog(
             onDismissRequest = { confirmForget = false },
@@ -320,6 +343,35 @@ private fun DeviceCardView(card: DeviceCard, cards: List<DeviceCard>, liveSessio
             dismissButton = { TextButton(onClick = { confirmForget = false }) { Text("Cancelar", color = TextSecondary) } },
             containerColor = SheetBackground
         )
+    }
+}
+
+/** Lista "Ignorados" (R10): señales marcadas "No es mío" en esta sesión de la app */
+@Composable
+private fun IgnoredPanel(kind: SensorKind, ignored: List<IgnoredSignal>, vm: DevicesViewModel) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(CardBackground)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text("Ignorados", fontWeight = FontWeight.Bold)
+        Text("No se usan mientras la app siga abierta.", fontSize = 12.sp, color = TextSecondary)
+        ignored.forEach { s ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    s.label,
+                    fontSize = 14.sp,
+                    color = TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = { vm.unignore(kind, s.id) }) { Text("Volver a usar", color = Accent) }
+            }
+        }
     }
 }
 

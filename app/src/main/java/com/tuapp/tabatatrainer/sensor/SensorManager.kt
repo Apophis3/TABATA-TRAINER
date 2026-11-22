@@ -69,7 +69,28 @@ class SensorManager @Inject constructor(
         SensorKind.CADENCE -> cadenceHub.unlinkSession(antId, bleId)
     }
 
-    /** Fuerza una reconexión completa de pulso y cadencia (botón "reconectar") */
+    // "No es mío" (spec 007, R10): señales ignoradas en esta sesión de la app (id -> etiqueta); sueltan su hueco y
+    // no se conectan ni se graban hasta "Volver a usar" o cerrar la app
+    fun hrIgnored(): StateFlow<Map<String, String>> = heartRateHub.ignored
+    fun cadenceIgnored(): StateFlow<Map<String, String>> = cadenceHub.ignored
+    fun ignoreSignals(kind: SensorKind, ids: Map<String, String>) = when (kind) {
+        SensorKind.HR -> heartRateHub.ignore(ids)
+        SensorKind.CADENCE -> cadenceHub.ignore(ids)
+    }
+    fun unignoreSignal(kind: SensorKind, id: String) = when (kind) {
+        SensorKind.HR -> heartRateHub.unignore(id)
+        SensorKind.CADENCE -> cadenceHub.unignore(id)
+    }
+
+    // Aparato nuevo (spec 007, R11): no se usa hasta que el usuario lo aprueba; "Sí, usar" lo guarda en el registro
+    fun hrToAsk(): StateFlow<List<NewDeviceAsk>> = heartRateHub.toAsk
+    fun cadenceToAsk(): StateFlow<List<NewDeviceAsk>> = cadenceHub.toAsk
+    fun approveSignal(kind: SensorKind, id: String, name: String) = when (kind) {
+        SensorKind.HR -> heartRateHub.approve(id, name)
+        SensorKind.CADENCE -> cadenceHub.approve(id, name)
+    }
+
+    /** Reconexión de pulso y cadencia (botón "reconectar"): reinicia las radios; conserva huecos e ignoradas */
     fun resetFlows() {
         Timber.d("🔄 SensorManager: reconexión de pulso y cadencia")
         heartRateHub.restart()

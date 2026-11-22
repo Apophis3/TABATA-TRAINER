@@ -1360,7 +1360,8 @@ private fun LandscapeLapsPage(
                 .weight(0.65f)
                 .fillMaxHeight()
                 .padding(start = 8.dp, bottom = PAGE_INDICATOR_CLEARANCE),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            // 4 dp (antes 8): la 3.ª fila de la rejilla quedaba unos dp cortada (plan §12)
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Text(
                 "Vuelta manual M${stats.manualLapsCount + 1}",
@@ -1377,7 +1378,7 @@ private fun LandscapeLapsPage(
                     // 22 sp / 5 dp: así caben las 3 filas sobre el hueco del indicador (plan §8)
                     valueFontSize = 22.sp,
                     cardPadding = 5.dp,
-                    spacing = 6.dp,
+                    spacing = 4.dp,   // antes 6 (plan §12)
                     modifier = Modifier.verticalScroll(rememberScrollState())
                 )
             }

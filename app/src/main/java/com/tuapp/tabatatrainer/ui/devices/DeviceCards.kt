@@ -55,6 +55,20 @@ data class DeviceCard(
         }
 }
 
+/**
+ * "No es mío" (spec 007, R10): señales que se ignoran al pulsarlo en [card], las vistas y las de su ficha guardada,
+ * con la etiqueta que muestra la lista "Ignorados" ("XOSS X2 · BLE XOSS X2" o, sin nombre propio, "ANT+ 12345").
+ */
+fun ignoreIds(card: DeviceCard): Map<String, String> {
+    fun label(signal: String) = if (card.title == signal) signal else "${card.title} · $signal"
+    val out = LinkedHashMap<String, String>()
+    card.signals.forEach { out[it.id] = label(signalLabel(it)) }
+    listOfNotNull(card.device?.antId, card.device?.bleId).forEach { id ->
+        if (id !in out) out[id] = label(if (id.startsWith("ANT:")) "ANT+ ${id.removePrefix("ANT:")}" else "BLE ${id.removePrefix("BLE:")}")
+    }
+    return out
+}
+
 /** Texto de la señal: "ANT+ 12345" o "BLE XOSS X2" */
 fun signalLabel(s: VisibleSignal): String =
     if (s.isAnt) "ANT+ ${s.id.removePrefix("ANT:")}" else "BLE ${s.name.ifBlank { s.id.removePrefix("BLE:") }}"

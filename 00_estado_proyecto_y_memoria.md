@@ -6,6 +6,45 @@ memoria privada de Claude. **Lo más reciente arriba.**
 
 ---
 
+## 2026-11-22 — Spec 007 · Arreglos tras el paseo (pendiente de prueba)
+- El usuario probó Ruta en un paseo (1.6.140) y pidió reparar dos fallos. Anotados antes del código (`spec.md`
+  R2.1, R8.2, R10; `plan.md` §13; entrada propia en `tasks.md`). Fuera de T-06 y T-07.
+- **Pulsómetro ajeno como HR2:** su canal ANT+ quedó "buscando" y el hueco siguió dando y grabando 142 fijo 36 min.
+  Ahora: sin dato 3 s → el hueco no da valor (conserva el aparato); Ruta no graba pulso de más de 5 s; un canal
+  ANT+ "buscando" más de 30 s se cierra y se vuelve a buscar. En la hoja, "No es mío" ignora esa señal (suelta su
+  hueco, no se conecta ni se graba) hasta "Volver a usar" o cerrar la app.
+- **Pulsómetro propio perdido:** "Reconectar" en Ruta y Tabata no reiniciaba las radios. Ahora sí (conserva huecos e
+  ignoradas). La causa de la caída no se pudo ver: el Logcat del paseo ya no estaba; el volcado Bluetooth muestra
+  una caída del Bluetooth a las 09:13 y llamadas por auriculares entre 10:10 y 10:44.
+- Tests +6 → suite esperada **236**. Sin compilar (lo hace el usuario). Sin tocar Room, Gradle ni `NavGraph.kt`;
+  `SensorManager` solo añade funciones (contrato anotado en la spec). Sin commit.
+- Abierto (decide el usuario): reinicio automático de radios.
+- **Después, R11 (aprobado por el usuario: "Sí, así"):** un pulsómetro o cadenciómetro sin guardar ya no entra solo en
+  ningún hueco. Tras 15 s oyéndose sale arriba, en cualquier pantalla, "¿Es tuyo?": "Sí, usar" lo guarda para
+  siempre; "No es mío" lo ignora. Si deja de oírse, el aviso se quita y su canal ANT+ se suelta a los 30 s. Las
+  bandas propias aún sin guardar preguntarán una vez. Aviso arriba y no abajo: abajo tapaba Pausa/Detener.
+  `spec.md` R11, `plan.md` §14. Tests +7 → **243/243 en verde** (1.6.143, 17:39); falta la prueba con bandas. `MainActivity` dibuja el aviso; `NavGraph.kt` sin
+  tocar.
+
+---
+
+## 2026-11-21 — Spec 007 · Arreglos tras la prueba parcial de T-06 (pendiente de prueba)
+- El usuario pidió terminar los pendientes menores mientras él prueba T-06. Anotados antes del código
+  (`spec.md` R3.1, `plan.md` §12, entrada propia en `tasks.md`). Fuera de T-06 y T-07; T-06 sigue `[ ]`.
+- **2.ª banda sin espera de 30 s (R3.1):** al comparar valores, una señal ya agrupada en la sesión solo se compara
+  con su pareja; ya no hace de rival (con dos bandas en el mismo pecho daba empate). El recuento para guardar
+  para siempre no cambia. Misma regla en cadencia.
+- **Ruta horizontal, página 3:** separaciones más pequeñas (8 → 4 y 6 → 4 dp) para que quepa la 3.ª fila; el
+  margen del indicador de páginas no se toca.
+- **Config:** salir ya no deja "Error crítico en collector" (era la cancelación normal).
+- **Visto al limpiar:** el aviso "Batería baja en HRx" no salía en Tabata ni Ruta desde T-04/T-05 (nadie leía las
+  baterías). `BatteryLowWarnings` las vuelve a leer. Borrado `rememberSensorBatteries` (sin uso).
+- No hecho (decide el usuario): acortar la pausa de 15 s entre búsquedas ANT+.
+- Tests +3 → suite esperada **230**. Sin compilar (lo hace el usuario). Sin tocar Room, Gradle, `NavGraph.kt`,
+  servicios ni contrato de `SensorManager`. Sin commit.
+
+---
+
 ## 2026-11-21 — Spec 007 · T-06: hoja "Dispositivos" + `SensorBar` programadas (pendiente de prueba)
 - El usuario aprobó `plan.md` §11 («Aprobado, sigue»). Código hecho; sin compilar ni instalar (lo hace el usuario).
 - Sensores (solo se añade): señales vistas con su aparato y hueco (`VisibleSignal`, `signals` en los hubs),

@@ -15,10 +15,14 @@ import kotlinx.coroutines.launch
 import timber.log.Timber
 import javax.inject.Inject
 
+/** Señal ignorada ("No es mío", R10) en la lista "Ignorados" de la hoja */
+data class IgnoredSignal(val id: String, val label: String)
+
 /** Lo que muestra la hoja para un tipo de sensor */
 data class DevicesKindState(
     val cards: List<DeviceCard> = emptyList(),
-    val guided: GuidedStep = GuidedStep.WaitingAnt
+    val guided: GuidedStep = GuidedStep.WaitingAnt,
+    val ignored: List<IgnoredSignal> = emptyList()
 )
 
 data class DevicesState(
@@ -41,12 +45,17 @@ class DevicesViewModel @Inject constructor(
 ) : ViewModel() {
 
     val state: StateFlow<DevicesState> = combine(
-        registry.devices, sensorManager.hrSignals(), sensorManager.cadenceSignals()
-    ) { saved, hr, cadence ->
+        registry.devices, sensorManager.hrSignals(), sensorManager.cadenceSignals(),
+        sensorManager.hrIgnored(), sensorManager.cadenceIgnored()
+    ) { saved, hr, cadence, hrIgnored, cadenceIgnored ->
         DevicesState(
-            hr = DevicesKindState(buildDeviceCards(SensorKind.HR, saved, hr), guidedPairing(SensorKind.HR, saved, hr)),
+            hr = DevicesKindState(
+                buildDeviceCards(SensorKind.HR, saved, hr), guidedPairing(SensorKind.HR, saved, hr),
+                hrIgnored.map { (id, label) -> IgnoredSignal(id, label) }
+            ),
             cadence = DevicesKindState(
-                buildDeviceCards(SensorKind.CADENCE, saved, cadence), guidedPairing(SensorKind.CADENCE, saved, cadence)
+                buildDeviceCards(SensorKind.CADENCE, saved, cadence), guidedPairing(SensorKind.CADENCE, saved, cadence),
+                cadenceIgnored.map { (id, label) -> IgnoredSignal(id, label) }
             )
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DevicesState())
@@ -118,6 +127,19 @@ class DevicesViewModel @Inject constructor(
     fun forget(card: DeviceCard) {
         val d = card.device ?: return
         registry.forget(card.kind, d.key)
+    }
+
+    /** "No es mío" (R10): sus señales sueltan el hueco y dejan de usarse hasta "Volver a usar" o cerrar la app */
+    fun ignore(card: DeviceCard) {
+        val ids = ignoreIds(card)
+        Timber.d("📋 Dispositivos: no es mío ${ids.keys}")
+        sensorManager.ignoreSignals(card.kind, ids)
+    }
+
+    /** "Volver a usar" una señal ignorada */
+    fun unignore(kind: SensorKind, id: String) {
+        Timber.d("📋 Dispositivos: volver a usar $id")
+        sensorManager.unignoreSignal(kind, id)
     }
 
     /** Modo guiado: une la ANT+ y la BLE vistas, con el nombre elegido y, si se pide, un hueco fijo */

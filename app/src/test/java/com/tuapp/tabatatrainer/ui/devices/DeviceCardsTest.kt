@@ -24,6 +24,17 @@ class DeviceCardsTest {
         PhysicalDevice(key = ant ?: ble!!, kind = HR, alias = alias, antId = ant, bleId = ble, preferredSlot = slot, manual = true)
 
     @Test
+    fun `no es mio ignora las senales vistas y las de su ficha (R10)`() {
+        // Visto solo por ANT+, guardado con las dos señales: se ignoran las dos
+        val banda = saved("ANT:1", "BLE:1", "Banda ajena")
+        val c = buildDeviceCards(HR, listOf(banda), listOf(ant("1"))).single()
+        assertEquals(mapOf("ANT:1" to "Banda ajena · ANT+ 1", "BLE:1" to "Banda ajena · BLE 1"), ignoreIds(c))
+        // Sin ficha y sin nombre propio: la etiqueta es la señal
+        val suelta = buildDeviceCards(HR, emptyList(), listOf(ant("7"))).single()
+        assertEquals(mapOf("ANT:7" to "ANT+ 7"), ignoreIds(suelta))
+    }
+
+    @Test
     fun `aparato guardado con sus dos senales vistas es una tarjeta`() {
         val banda = saved("ANT:1", "BLE:1", "Banda roja", slot = 0)
         val cards = buildDeviceCards(HR, listOf(banda), listOf(ble("1", group = "ANT:1", slot = 0), ant("1", slot = 0)))

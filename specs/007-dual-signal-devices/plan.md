@@ -332,7 +332,7 @@ Los tres "pendientes vistos" en T-04/T-05. No es T-06 (que sigue sin empezar).
 - `slotSignalColor` pasa a `SensorSlotBadge.kt` (público). Borrados: Home `SensorBar`/`SensorWithBattery`/
   `SensorDot`; Config `SlotStatusChip`; Tabata `SensorStatusChips`/`SensorChip`; Ruta `FreeRideSensorBar`,
   `CompactSensorRow`, `SensorChipAnimated`, `SensorDot` y su `slotSignalColor` privado. `rememberSensorBatteries`
-  queda sin uso (no se borra).
+  queda sin uso (se borra en §12).
 - Aviso "sesión en curso" bajo el selector de hueco: Config si no se puede empezar (`!canStartWorkout`), Tabata
   con la fase distinta de parado/terminado, Ruta con `isRunning`. **Home: nunca** (no sabe si hay una sesión en
   segundo plano); el cambio de hueco se aplica igual.
@@ -340,6 +340,141 @@ Los tres "pendientes vistos" en T-04/T-05. No es T-06 (que sigue sin empezar).
   (`isGpsTracking`) o gris (no hay estado "buscando" en Tabata); Ruta con/buscando/sin, como antes.
 - Ruta en horizontal (páginas 1 y 3): la barra compacta tiene el mismo tamaño que antes (solo se añade el toque);
   el recorte de la 3.ª fila de la página 3 no se ha tocado.
+
+### 12. Arreglos tras la prueba parcial de T-06 (pedidos por el usuario 2026-11-21; fuera de T-06 y T-07)
+- **Espera de 30 s de la 2.ª banda (R3.1).** Visto en la 1.6.138: tras Reconectar, la XOSS se agrupa en la sesión
+  (ANT+ ↔ BLE) y, al llegar la ANT+ de la Decathlon, `PairingPolicy` compara las 4 señales: con las dos bandas en
+  el mismo pecho, Decathlon ANT+ se parece igual a su BLE que al de la XOSS → empate → sin agrupar → la ANT+
+  espera la cuarentena de 30 s.
+  - `PairingPolicy.evaluate(signals, lookup, sessionPartners = emptyMap())`: `sessionPartners` = señal agrupada
+    solo en la sesión → señales del otro protocolo de su mismo grupo. En la comparación por valores (paso 2) se
+    descartan los candidatos que unen una señal agrupada con otra que no es su pareja. Su propia pareja **sí** se
+    sigue comparando (con una sola banda, la agrupación de sesión de los 15 s pasa a guardada a los 30 s, como
+    hasta ahora). El recuento "1 ANT+ + 1 BLE sin emparejar" (guardar para siempre) **no cambia**: sigue contando
+    todas las señales, así con dos bandas nada se guarda solo.
+  - `DualSlotAllocator.sessionPartners(ids)`: entre las señales dadas que no están emparejadas en el registro, las
+    que comparten grupo con otra del otro protocolo (agrupadas en la sesión). Lo llaman `HeartRateHub` y
+    `CadenceHub` en `detectTwins` (misma lógica en cadencia, R5).
+  - Tests: `PairingPolicyTest` +2 (XOSS agrupada + Decathlon indistinguible → la Decathlon se agrupa en la sesión
+    y nunca se guarda; la pareja agrupada sigue comparándose), `DualSlotAllocatorTest` +1 (`sessionPartners`).
+- **Ruta horizontal, página 3: borde de la 3.ª fila cortado.** Faltan unos dp en la columna derecha
+  (`LandscapeLapsPage`). Se quitan de los huecos, no del margen del indicador de páginas (`PAGE_INDICATOR_CLEARANCE`
+  se queda en 56 dp para no volver a taparlo): separación de la columna 8 → 4 dp y de la rejilla 6 → 4 dp
+  (≈ 12 dp más para las filas). Falta que el usuario la pruebe también con una vuelta cerrada (columna izquierda).
+- **Error falso al salir de Config.** Los dos colectores de `ConfigViewModel` capturan `Exception`, que incluye la
+  cancelación normal al salir de la pantalla, y la registran como "Error crítico". Se deja pasar la cancelación
+  (`CancellationException`) antes de la captura general. Sin cambio de comportamiento.
+- **Limpieza:** se borra `rememberSensorBatteries` (sin uso desde T-06). `SensorBatteryViewModel` y
+  `BATTERY_SLOT_LABELS` siguen en uso.
+- **Aviso "Batería baja en HRx" perdido (visto al limpiar).** El aviso (spec 005) sale de `SensorBatteryViewModel
+  .batteries`, que solo se calcula si alguien lo lee. Tabata y Ruta lo leían con `rememberSensorBatteries` hasta
+  T-04/T-05 de esta spec (pasaron a `SlotStatus`); desde entonces `BatteryLowWarnings` escucha el aviso pero nadie
+  lee las baterías y el aviso no sale nunca. Arreglo: `BatteryLowWarnings` lee también `batteries` mientras la
+  pantalla está abierta. Sin cambios en sensores ni servicios. Sin test (es de pantalla); se ve con una banda con
+  batería baja (si no hay ninguna, queda sin probar).
+- **No se hace (pendiente de decidir por el usuario):** acortar la pausa de 15 s entre búsquedas ANT+
+  (`AntRadio.SEARCH_PAUSE_MS`). Esa pausa deja la radio libre para conectar los canales (con la búsqueda abierta,
+  `requestAccess` falla); no se puede probar con tests y mezclaría su efecto con el arreglo de R3.1 en la misma
+  prueba.
+- Suite esperada: 227 + 3 = **230**. Sin tocar Room, Gradle, `NavGraph.kt`, ciclo de vida de los servicios ni el
+  contrato de `SensorManager`.
+
+### 13. Arreglos tras el paseo del 2026-11-22 (1.6.140; R2.1 ampliado, R8.2 aclarado, R10; fuera de T-06 y T-07)
+**Evidencia (BD y volcado Bluetooth del S22+; el Logcat del paseo ya no estaba en el búfer).** Sesión de Ruta
+09:23–10:45. HR2 (pulsómetro de un desconocido, nunca guardado) aparece a las 09:27 y graba **142 fijo de 09:37 a
+10:13**. HR1 (XOSS) graba hasta las 10:22:48 y luego nada; Reconectar no lo recupera. Bluetooth del sistema caído y
+reiniciado a las 09:13 (antes de salir); llamadas por los auriculares 10:10–10:44. La causa de perder la XOSS por
+ANT+ y BLE a la vez **no se puede probar** sin Logcat.
+
+**Fallos confirmados en el código:**
+1. Un aparato ANT+ que deja de oírse queda en "buscando" (`DeviceState.SEARCHING`) y solo se trataba `DEAD`: sigue
+   "conectado" sin fin y ocupa un canal ANT+ (con 2 canales ocupados no se busca más).
+2. `DualSlotAllocator.pickSource` mantiene como fuente una señal conectada sin dato reciente, con su último valor;
+   el hub reemite `Connected` y nunca `Disconnected` → `FreeRideService` sigue grabando el último valor.
+3. `FreeRideService.reconnectSensors` y `WorkoutService.refreshSensors` solo cancelan y relanzan sus colectores;
+   como vuelven a suscribirse a los 0,5 s (antes de los 5 s de parada del hub), las radios **nunca** se reinician.
+   Solo Home (`ConfigViewModel.refreshSensors`) llamaba a `resetFlows()`.
+4. La hoja no permite quitar una señal no guardada ("Olvidar" solo existe para aparatos guardados).
+
+**Arreglos:**
+- **Sin valor congelado (R2.1).** `DualSlotAllocator` recibe `staleHoldMs` (3 s): si la fuente del hueco está
+  conectada pero sin dato reciente (la frescura ya caduca a los 5 s), a los 3 s más el hueco se queda sin fuente
+  (`sourceId = null`, `connected = false`) → el hub emite `Disconnected` (como al apagarse) y los servicios borran el
+  valor. En cuanto llega un dato nuevo vuelve a tener fuente y valor. El aparato **no** pierde su hueco (sigue
+  "vivo" para el reparto: sin relevos ni esperas nuevas). Defensa extra en `FreeRideService`: cada valor de pulso
+  guarda su hora y `saveSensorReading` solo graba el de los últimos 5 s (como ya hace `WorkoutService`).
+- **ANT+ perdido (R2.1).** En los dos hubs, el receptor de estado anota cuándo pasa a `SEARCHING` (y lo borra al
+  volver a `TRACKING`); el tick de 1 s da por perdido el aparato que lleva ≥ 30 s buscando: el mismo camino que
+  `DEAD` (marca desconectado, cierra el canal, vuelve a pedir búsqueda). Logcat `buscando (no se oye)` /
+  `se oye de nuevo` / `sin señal 30 s, se volverá a buscar`.
+- **Reconectar de verdad (R8.2).** `restart()` de los hubs pasa a parar solo las radios (`stopRadios`) y volver a
+  arrancar: conserva el reparto de huecos y los vínculos de sesión (R9; antes también los olvidaba). Se llama con
+  `sensorManager.resetFlows()` en `WorkoutService.refreshSensors` (al principio, con los colectores aún suscritos: el
+  hub para y arranca en el acto) y en `FreeRideService.reconnectSensors` (en segundo plano, tras cancelar los
+  colectores: el hub para y arranca cuando se vuelven a suscribir a los 0,5 s). `FreeRideService` borra además
+  `currentHr1/2` al reconectar.
+- **Ignorar (R10).** `DualSlotAllocator`: lista de ignoradas (id → etiqueta) que **no** borra `clear()`; `ignore()`
+  suelta en el acto el hueco de su aparato y los vínculos de sesión; `tick()` y `describe()` las dejan fuera.
+  Hubs: `ignore(ids)` / `unignore(id)` / `ignored` (StateFlow); `isAntKnown` devuelve true para un ANT+ ignorado (la
+  búsqueda no lo conecta), el escaneo y el reintento BLE lo saltan, y el tick cierra cualquier canal o GATT de una
+  señal ignorada que siga abierto. "Volver a usar" pide una búsqueda ANT+ nueva. `SensorManager` lo expone. Hoja:
+  botón "No es mío" con confirmación en toda tarjeta con señal y sección "Ignorados" con "Volver a usar".
+
+**Análisis de impacto (Clave 3, servicios).** No cambia el ciclo de vida de `WorkoutService` ni de
+`FreeRideService`: ni arranque, ni parada, ni notificación, ni colectores nuevos. Solo se añade una llamada a un
+método que ya existía (`resetFlows()`) dentro del método de reconexión que ya existía, y en `FreeRideService` dos
+marcas de tiempo internas. El cronómetro y la grabación siguen. R8.3 se conserva (la hoja no para la sesión) y R9
+también (Reconectar ya no olvida los huecos). Tras Reconectar, los huecos pasan por `Scanning`/`Disconnected` unos
+segundos (sin valor grabado) hasta que vuelven los datos. `NavGraph.kt`, Room y Gradle sin tocar.
+
+**No se hace (lo decide el usuario):**
+- Vigilante que reinicie solo las radios si un aparato guardado lleva N s sin fuente: podría reiniciar en bucle con
+  una banda que simplemente no se lleva puesta.
+- Que un desconocido no ocupe HR2 solo con una sesión en marcha (cambia R1; con R10 se quita en dos toques).
+
+**Tests (suite esperada 230 + 6 = 236):** `DualSlotAllocatorTest` +5 (fuente conectada sin dato: valor hasta 3 s y
+luego sin fuente con el hueco conservado; vuelve con dato nuevo; ignorar suelta el hueco y no lo vuelve a ocupar;
+ignorar sobrevive a `clear()`; volver a usar). `DeviceCardsTest` +1 (ids de una tarjeta para ignorar). Reconectar,
+`SEARCHING` y el cierre de canales no se pueden probar sin radio: prueba real.
+**Test cambiado:** `CadenceSlotAllocatorTest` "ANT conectada sin datos (biela parada) conserva el hueco" pasa a
+"…conserva el hueco pero no da valor (R2_1)": 30 s sin **ningún** paquete → hueco conservado y sin fuente. La biela
+parada real sigue siendo 0 rpm válido porque la ANT+ manda paquetes sin vuelta (`onAlive` la mantiene fresca). Un
+cadenciómetro BLE que deja de notificar al parar pasa a "sin valor" a los ≈ 8 s en lugar de mostrar 0 fijo (a
+vigilar en T-07).
+
+### 14. Un aparato nuevo pregunta antes de usarse (R11; pedido por el usuario 2026-11-22; fuera de T-06 y T-07)
+**Motivo:** en el paseo, la banda de alguien que pasaba entró sola como HR2. El usuario prefiere que la app
+pregunte "¿quieres conectar este otro pulsómetro?" y que, si solo se oye un rato, se suelte sola.
+
+**`DualSlotAllocator`** (lógica pura):
+- Nuevo parámetro `askNewMs: Long? = null` (null = no pregunta, como hasta ahora; los dos hubs pasan 15 s). Los tests
+  antiguos no lo usan y siguen probando el reparto sin la pregunta; los nuevos lo activan.
+- Aparato de confianza: alguna de sus señales (`idsOf`) tiene ficha en el registro o está en `approved` (aprobadas en
+  la sesión; sobreviven a `clear()`).
+- `assignPending`: tras la cuarentena (R3) y antes de `slotFor`, un aparato sin confianza no recibe hueco; si su señal
+  tiene dato, cuenta en `askSince` desde cuándo; sin dato o fuera de la lista se borra. A los `askNewMs` pasa a
+  `asking()` (`NewDeviceAsk`: tipo, id, nombre, señal, valor; ANT+ primero).
+- `slotFor`: la cuenta de aparatos ANT+ para "ANT+ desplaza a BLE" solo incluye aparatos de confianza o con hueco.
+- `approve(id)` (borra su cuenta), `ignore()` y `pause()` también borran cuentas.
+- Logcat: "… nuevo, sin aprobar: se preguntará" y "… aprobado".
+
+**Hubs** (`HeartRateHub`, `CadenceHub`): `toAsk: StateFlow<List<NewDeviceAsk>>` (se rellena en cada tick, vacío al
+parar las radios) y `approve(id, name)` = `registry.remember(kind, id, name)` + `allocator.approve(id)`.
+`SensorManager`: `hrToAsk()`, `cadenceToAsk()`, `approveSignal(kind, id, name)` (solo se añade).
+
+**UI:** `ui/devices/NewDevicePrompt.kt`: `NewDevicePromptViewModel` (Hilt; pulso primero, luego cadencia; un aviso
+cada vez) y `NewDevicePrompt` (franja arriba con "Sí, usar" / "No es mío"; "No es mío" usa `ignoreSignals` con la
+etiqueta "nombre · señal"). Se dibuja en `MainActivity` dentro del `Box` de `NavGraph()`, alineada arriba (abajo
+taparía Pausa/Detener e indicadores de página; arriba ya sale el aviso de km de Ruta). Observarla no arranca sensores.
+
+**Impacto (Clave 3):** sin cambios en `NavGraph.kt`, servicios, Room ni Gradle. `MainActivity` ya es
+`@AndroidEntryPoint`; el ViewModel vive con la actividad. Los aparatos ya guardados no cambian. Las bandas propias no
+guardadas preguntan una vez (el "Sí" las guarda).
+
+**Tests (suite esperada 236 + 7 = 243), `DualSlotAllocatorTest` con la pregunta activada:** un desconocido no recibe
+hueco y se pregunta a los 15 s; la cuenta vuelve a cero si deja de dar dato; aprobar le da hueco y quita el aviso;
+un aparato guardado entra sin preguntar; la otra señal de un aparato aprobado no pregunta; un ANT+ sin aprobar no
+desplaza a un BLE propio; ignorar quita el aviso. La franja y el guardado en el registro: prueba real.
 
 ## Archivos
 - Nuevos: `sensor/SensorDeviceRegistry.kt`, `sensor/PairingPolicy.kt`, `sensor/DualSlotAllocator.kt`,

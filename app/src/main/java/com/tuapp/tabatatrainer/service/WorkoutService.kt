@@ -457,6 +457,8 @@ class WorkoutService : Service() {
      */
     fun refreshSensors() {
         Log.d(TAG, "🔄 Refrescando sensores HR y Cadencia...")
+        // Reinicio real de las radios ANT+ y BLE (spec 007, R8.2); conserva huecos y señales ignoradas
+        sensorManager.resetFlows()
         // Cancelar jobs existentes para forzar una nueva suscripción y, por ende, una nueva autoconexión
         hrCollectorJob?.cancel()
         hr2CollectorJob?.cancel()

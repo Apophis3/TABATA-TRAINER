@@ -2,7 +2,53 @@
 
 Documento para continuar en un hilo nuevo (texto de arranque: el que da el agente en el chat).
 
-## Siguiente (2026-11-21, T-06 en commit; prueba parcial con la 1.6.138, el resto mañana)
+## Siguiente (2026-11-22, arreglos tras el paseo programados, sin probar)
+- **Paseo del usuario 2026-11-22 (1.6.140, Ruta 09:23–10:45):** (a) la banda ANT+ de alguien que pasaba entró como
+  HR2 y no se podía quitar; grabó 142 fijo 36 min (canal en "buscando" y `pickSource` daba su último valor);
+  (b) la XOSS (HR1) dejó de dar dato a las 10:22 y "Reconectar" no la recuperó (no reiniciaba las radios). Logcat
+  del paseo perdido (búfer); visto en el volcado Bluetooth: caída del Bluetooth a las 09:13 y llamadas por
+  auriculares 10:10–10:44. Causa exacta de (b) sin probar.
+- **Arreglos `plan.md` §13** (`spec.md` R2.1 ampliado, R8.2, R10; entrada propia en `tasks.md`), sin commit, sin
+  compilar:
+  - Sin valor congelado: `DualSlotAllocator.pickSource` mantiene una señal conectada sin dato 3 s y luego el hueco
+    queda sin fuente (conserva el aparato). `FreeRideService` solo graba pulso de menos de 5 s.
+  - ANT+ "buscando" > 30 s → perdido: canal cerrado y nueva búsqueda (`onAntState` / `checkAntLost` en los hubs).
+  - Reconectar de verdad: `hub.restart()` reinicia radios y conserva huecos e ignoradas; lo llaman
+    `WorkoutService.refreshSensors` y `FreeRideService.reconnectSensors`.
+  - "No es mío" en cada tarjeta de la hoja (con confirmación) + panel "Ignorados" con "Volver a usar". Ignoradas
+    solo en memoria (hasta cerrar la app).
+  - Tests +6 → suite esperada **236** (`DualSlotAllocatorTest` +5, `DeviceCardsTest` +1; cambiado un test de
+    `CadenceSlotAllocatorTest`).
+- **Prueba pedida:** suite 236; "No es mío" en la 2.ª banda; Reconectar con la ignorada; "Volver a usar"; quitar una
+  banda → valor apagado en ≈ 8 s y no grabado; con HR1 caída, Reconectar en Ruta. Logcat `💓`/`🚴`.
+- **R11 aprobado por el usuario el mismo día ("Sí, así") y programado (`plan.md` §14):** un aparato sin guardar no
+  ocupa hueco (tampoco el primero); tras 15 s con dato sale arriba "¿Es tuyo?" con "Sí, usar" (lo guarda con
+  `registry.remember`) y "No es mío" (R10). `DualSlotAllocator(askNewMs)` (los hubs pasan 15 s; los tests antiguos
+  sin pregunta), `NewDeviceAsk`, `toAsk` en los hubs, `hrToAsk/cadenceToAsk/approveSignal` en `SensorManager`,
+  `ui/devices/NewDevicePrompt.kt` dibujado en `MainActivity`. Tests +7 → **243/243 en verde** (1.6.143). Falta la prueba con bandas.
+- **Prueba de R11:** con una banda propia sin guardar, el aviso sale a los ~15 s y "Sí, usar" la pone en HR1; al
+  reabrir la app ya no pregunta. Con una 2.ª banda, "No es mío" la manda a "Ignorados". Una banda que se apaga antes
+  de 15 s no provoca aviso. Logcat `💓` "nuevo, sin aprobar" / "aprobado".
+- **Decisión abierta (usuario):** reinicio automático si un hueco guardado lleva mucho sin dato.
+
+## Antes (2026-11-21, arreglos tras la prueba parcial de T-06 programados, sin probar)
+- **Arreglos `plan.md` §12** (pedidos por el usuario; entrada propia en `tasks.md`, fuera de T-06/T-07), sin
+  commit, sin compilar:
+  - R3.1: una señal agrupada en la sesión solo se compara con su pareja (`PairingPolicy.evaluate(…, sessionPartners)`,
+    `DualSlotAllocator.sessionPartners`, llamado en `detectTwins` de los dos hubs) → la 2.ª banda ya no espera
+    30 s por empate con la 1.ª agrupada. Lo guardado para siempre no cambia.
+  - Página 3 de Ruta en horizontal: separaciones 8 → 4 dp (columna) y 6 → 4 dp (rejilla).
+  - `ConfigViewModel`: la cancelación al salir ya no se registra como "Error crítico".
+  - Borrado `rememberSensorBatteries`; `BatteryLowWarnings` vuelve a leer las baterías (el aviso "Batería baja" no
+    salía en Tabata ni Ruta desde T-04/T-05).
+  - Suite esperada **230** (227 + 3: `PairingPolicyTest` +2, `DualSlotAllocatorTest` +1).
+  - Prueba: Reconectar con las dos bandas puestas → la ANT+ de la 2.ª se agrupa en ~15 s (Logcat `agrupados en la
+    sesión`), sin esperar 30 s; página 3 en horizontal con la 3.ª fila entera (y con una vuelta cerrada); salir de
+    Config sin `Error crítico`; aviso de batería baja si alguna banda la tiene.
+- **No hecho, lo decide el usuario:** acortar la pausa de 15 s entre búsquedas ANT+ (`AntRadio.SEARCH_PAUSE_MS`).
+- Las pruebas de T-06 de abajo siguen igual (valen con la 1.6.138 o con la siguiente).
+
+## Antes (2026-11-21, T-06 en commit; prueba parcial con la 1.6.138, el resto mañana)
 - **T-06 aprobado, programado y en commit** (`plan.md` §11; notas de lo hecho en §11.9). Probado en parte con la
   1.6.138 (ver abajo); el usuario hace el resto de pruebas al día siguiente.
 - **Orden de prueba que falta** (se le dio al usuario):
@@ -66,7 +112,7 @@ Documento para continuar en un hilo nuevo (texto de arranque: el que da el agent
 - En todas las pantallas se ve el hueco dentro de un recuadro verde (ANT+) o azul (BLE) y la batería (R6, R6.1).
   Cadencia con el mismo criterio.
 
-## Estado (T-01…T-05 y los tres arreglos previos a T-06 validados; T-06 con código, sin probar)
+## Estado (T-01…T-05 y los tres arreglos previos a T-06 validados; T-06 en prueba parcial con la 1.6.138; arreglos §12 con código, sin probar)
 - **T-01 [x]** registro genérico `SensorDeviceRegistry`/`DeviceBook` + `PairingPolicy`.
 - **T-02 [x]** `DualSlotAllocator` (huecos fijos, ANT+ desplaza a BLE, cuarentena, `SlotStatus`).
 - **T-03 [x]** salvo cadencia real: `CadenceHub`, `CscParser`, `AntRadio` (búsqueda ANT+ compartida),
