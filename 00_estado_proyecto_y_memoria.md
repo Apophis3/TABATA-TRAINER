@@ -6,6 +6,36 @@ memoria privada de Claude. **Lo más reciente arriba.**
 
 ---
 
+## 2026-11-24 — Spec 008 · T-02 interruptor, registrador y eventos (hecha, 301/301)
+- `plan.md` §3.1 fija los detalles: cada llamada lleva el nombre del servicio (los dos pueden estar vivos porque
+  Config enlaza `WorkoutService`); pausa/reanudación/parada solo del servicio de la sesión; motivos `user`,
+  `completed`, `service_destroyed`, `replaced`; estado de partida con `,initial`; eventos vaciados al instante;
+  un hilo «RawLog» por sesión.
+- Código: `RawLogSettings` (preferencias `raw_log`, apagado por defecto) + interruptor «Registro bruto (pruebas)»
+  en Config (al final, en vertical y en la columna izquierda en horizontal). `RawSessionCore` (Kotlin puro:
+  carpeta, `events.csv`, reglas por servicio, `write_error`, filas por archivo). `RawSessionLogger` (hilo,
+  receptores de pantalla/Doze/Doze ligero/ahorro, permisos, `meta.json` con `.tmp` + renombrar, Logcat «RawLog»).
+  `AppVisibilityTracker` registrado en `TabataApp` (girar la pantalla no cuenta como salir).
+- Servicios: una línea en `onCreate`, `start*`, `pause*`, `resume*`, `stopRide`/`finishWorkout` (Tabata solo con
+  GPS) y `onDestroy` (antes de `super`); nuevos `onTaskRemoved`/`onTrimMemory` que llaman a `super` y anotan.
+  Sin tocar Room, Gradle, `NavGraph.kt`, `GpsManager`, `SensorManager` ni `START_NOT_STICKY`.
+- Tests +17 (`RawSessionCoreTest`) → suite esperada **301**. Sin compilar ni probar (lo hace el usuario). Sin commit.
+- Suite del usuario **301/301** (RawSessionCoreTest 17/17).
+- Prueba en S22 Ultra (1.6.149, Android 16): dos Rutas Libres. Apagado → sin carpeta. Encendido → una carpeta con
+  `events.csv` (16 filas: `service_created`, `session_start`, 7 `,initial`, pausa, reanudación, app a segundo
+  plano, pantalla off/on, app delante, `session_stop reason=user`) y `meta.json` completo, 0 errores. Logcat igual.
+- Cambio pedido tras la prueba: el interruptor está ahora en **dos sitios con el mismo ajuste** — Ruta Libre (pastilla
+  «Registro bruto», solo antes de Iniciar; vertical bajo «PREPARADO», horizontal bajo el cronómetro) y Config del
+  Tabata (tarjeta). Componente común `ui/components/RawLogToggle.kt` con su `RawLogToggleViewModel`;
+  `ConfigViewModel` vuelve a como estaba. R1 en `spec.md`, `plan.md` §2 y `tasks.md` actualizados antes del código.
+  Tabata con GPS sigue grabando si está encendido (decisión del usuario).
+- Flecha atrás añadida en Config del Tabata (no la tenía desde el commit inicial): llama al «atrás» del sistema
+  (`LocalOnBackPressedDispatcherOwner`), así que vuelve al inicio sin tocar `NavGraph.kt`.
+- Usuario (1.6.151): suite 301/301 (confirmado en los XML), interruptor en los dos sitios a la par y flecha
+  correctos. T-02 marcada `[x]`. Siguiente: T-03 (`gps_fused.csv`), solo cuando el usuario lo pida.
+
+---
+
 ## 2026-11-24 — Spec 008 · T-01 formato y escritor (hecha, 284/284)
 - Usuario aprobó `plan.md` (§10: `onTaskRemoved`/`onTrimMemory` solo anotan; borrar la carpeta con la sesión;
   prueba de pantalla apagada dos veces, sin excluir y excluyendo a mano del ahorro, sin botón para pedirlo).

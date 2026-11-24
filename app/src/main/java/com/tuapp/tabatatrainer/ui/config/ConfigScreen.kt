@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.content.res.Configuration
 import android.os.IBinder
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -179,6 +180,8 @@ fun ConfigScreen(
             activeWorkout.phase == WorkoutPhase.IDLE ||
             activeWorkout.phase == WorkoutPhase.FINISHED
 
+    val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -188,6 +191,12 @@ fun ConfigScreen(
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.sp
                     )
+                },
+                // Flecha atrás: hace lo mismo que el gesto/botón «atrás» del móvil (vuelve al inicio sin tocar NavGraph)
+                navigationIcon = {
+                    IconButton(onClick = { backDispatcher?.onBackPressed() }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Volver", tint = Color.White)
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = TabataColors.CoolGray,
@@ -280,6 +289,9 @@ fun ConfigScreen(
                         color = TabataColors.RoundsBlue,
                         unit = ""
                     )
+
+                    // Registro en bruto para pruebas (spec 008, R1): mismo ajuste que en Ruta Libre
+                    RawLogToggle()
                 }
 
                 // Columna derecha: Resumen y acción
@@ -430,6 +442,9 @@ fun ConfigScreen(
                     },
                     enabled = canStartWorkout
                 )
+
+                // Registro en bruto para pruebas (spec 008, R1): mismo ajuste que en Ruta Libre
+                RawLogToggle()
 
                 Spacer(modifier = Modifier.height(8.dp))
             }

@@ -57,6 +57,7 @@ import com.tuapp.tabatatrainer.service.LapData
 import com.tuapp.tabatatrainer.service.MapPoint
 import com.tuapp.tabatatrainer.sensor.SlotStatus
 import com.tuapp.tabatatrainer.ui.components.BatteryLowWarnings
+import com.tuapp.tabatatrainer.ui.components.RawLogToggle
 import com.tuapp.tabatatrainer.ui.components.SENSOR_SLOT_LABELS
 import com.tuapp.tabatatrainer.ui.components.SensorSlotBadge
 import com.tuapp.tabatatrainer.ui.components.rememberSensorSlots
@@ -318,6 +319,12 @@ private fun MetricsPage(
 
         // Estado
         StatusLabel(stats = stats)
+
+        // Registro en bruto (spec 008, R1): solo antes de Iniciar; se decide al empezar la ruta
+        if (!stats.isRunning) {
+            Spacer(modifier = Modifier.height(6.dp))
+            RawLogToggle(compact = true)
+        }
 
         // Timer grande
         Text(
@@ -1265,6 +1272,8 @@ private fun LandscapeMetricsPage(
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 StatusLabel(stats = stats, fontSize = 12)
                 Text(formatDuration(stats.totalTimeSeconds), fontSize = 70.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                // Registro en bruto (spec 008, R1): solo antes de Iniciar
+                if (!stats.isRunning) RawLogToggle(compact = true)
             }
 
             // Controles compactos

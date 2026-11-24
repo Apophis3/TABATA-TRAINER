@@ -24,15 +24,17 @@ Estado: **aprobado por el usuario el 2026-11-24** («Lo demás de plan.md, aprob
 ## 2. Paquete nuevo `com.tuapp.tabatatrainer.rawlog`
 | Clase | Qué hace | Android |
 |---|---|---|
-| `RawRows` | Datos simples (`FusedFix`, `BaroSample`, `BatterySample`, `RawEvent`, `GnssSat`) y funciones que los convierten en una fila CSV. Cabeceras como constantes. | No (Kotlin puro, testeable) |
+| `RawRows` | Datos simples (`LocationFix`, `BaroSample`, `BatterySample`, `RawEvent`, `GnssSat`) y funciones que los convierten en una fila CSV. Cabeceras como constantes. | No (Kotlin puro, testeable) |
 | `RawCsvFormat` | Números con `Locale.ROOT`, vacío si falta, comillas CSV para textos. | No |
 | `RawFileWriter` | Un archivo: crea con cabecera, añade filas a un búfer en memoria, vacía cada 5 s, al instante si se pide, y al cerrar. Si falla una escritura, marca el archivo como roto y lo dice una vez (callback). Nunca lanza excepciones. Reloj inyectado para los tests. | Solo `java.io` (testeable con carpeta temporal) |
 | `RawLogSettings` | Interruptor en `SharedPreferences` (`raw_log`, clave `enabled`, por defecto `false`). | Sí |
-| `RawSessionLogger` | `@Singleton` (Hilt). `start(sessionId, activityType)`, `event(type, detail, flushNow)`, `stop(reason)`. Abre la carpeta, crea un `HandlerThread` propio («RawLog»), arranca las fuentes y escribe `meta.json`. Si el interruptor está apagado al llamar a `start`, no hace nada y el resto de llamadas tampoco. | Sí |
+| `RawLogToggle` (en `ui/components/`) | Interruptor común con su propio `RawLogToggleViewModel` (`@HiltViewModel`, lee y guarda `RawLogSettings`). Se usa en dos sitios con el mismo ajuste (2026-11-24): Ruta Libre, solo antes de Iniciar (versión compacta; vertical: bajo «PREPARADO»; horizontal: bajo el cronómetro), y Config del Tabata (tarjeta). Sin tocar `FreeRideService`, `ConfigViewModel` ni `NavGraph.kt`. | Sí |
+| `RawSessionLogger` | `@Singleton` (Hilt). Cada llamada lleva el nombre del servicio (§3.1): `serviceCreated(service)`, `start(service, sessionId, activityType)`, `pause(service)`, `resume(service)`, `stop(service, reason)`, `serviceDestroyed(service)`, `taskRemoved(service)`, `trimMemory(service, level)`. Crea un `HandlerThread` propio («RawLog») por sesión, arranca las fuentes y escribe `meta.json`. Si el interruptor está apagado al llamar a `start`, no hace nada y el resto de llamadas tampoco. | Sí |
+| `RawSessionCore` | Reglas de la sesión sin Android: abrir carpeta y `events.csv`, qué servicio manda, eventos, parada, `write_error`, filas por archivo (§3.1). | No (testeable) |
 | `RawFusedSource` | Petición Fused propia (§4). | Sí |
 | `RawBaroSource` | Barómetro con `android.hardware.SensorManager` (no el `SensorManager` de la app). | Sí |
 | `RawBatterySource` | Lectura de batería cada 60 s y a demanda. | Sí |
-| `RawSystemSource` | Receptores de pantalla, Doze, Doze ligero, ahorro; estado inicial de energía y permisos. | Sí |
+| (receptores del sistema) | Receptores de pantalla, Doze, Doze ligero, ahorro; estado inicial de energía y permisos. En T-02 van dentro de `RawSessionLogger` (no hay clase `RawSystemSource` aparte). | Sí |
 | `AppVisibilityTracker` | Cuenta actividades visibles con `registerActivityLifecycleCallbacks` en `TabataApp`; avisa al registrador de primer/segundo plano. Sin dependencias nuevas. | Sí |
 | `RawLogExporter` | Tamaño de la carpeta, zip con `java.util.zip` en `cacheDir/rawlog_<id>.zip`, borrar carpeta. Comprimir **no** toca la carpeta `rawlog/<sessionId>/`: solo se borra al borrar la sesión (R14). Lo único temporal es el `.zip` de la caché; en T-05 se borran los `rawlog_*.zip` viejos antes de crear uno nuevo (no justo después de compartir, porque la app que lo recibe lo lee más tarde). | `java.io` (testeable) |
 
@@ -41,7 +43,8 @@ tocar el hilo principal (la UI y el GPS de la app no esperan al disco) y sin car
 
 ## 3. Ciclo de una sesión con el interruptor encendido
 1. `service_created`: el servicio llama a `logger.serviceCreated(...)` en `onCreate`. Como aún no hay sesión,
-   el registrador guarda la hora (epoch y elapsed) en memoria y la escribe como primera fila al empezar.
+   el registrador guarda la hora (epoch y elapsed) de cada servicio vivo en memoria y, al empezar, escribe un
+   `service_created` por servicio (en orden de tiempo, con su hora real) antes de `session_start`.
 2. `start`: `FreeRideService.startRide()` / `WorkoutService.startWorkout()` (este solo con GPS activado) llaman
    a `logger.start(sessionId, "FREE_RIDE" | "TABATA")` **después** de crear su `sessionId` y sin cambiar nada
    más. El registrador lee el interruptor; si está apagado, termina aquí.
@@ -53,6 +56,28 @@ tocar el hilo principal (la UI y el GPS de la app no esperan al disco) y sin car
 
 Si el proceso muere de golpe se pierden como mucho los últimos 5 s (lo aceptado en el pedido).
 
+### 3.1 Detalles fijados al hacer T-02
+- **Dos servicios a la vez.** Config enlaza `WorkoutService` aunque se esté en una Ruta, así que los dos pueden
+  estar vivos. Cada llamada lleva el nombre del servicio (`FreeRideService` / `WorkoutService`). Pausa,
+  reanudación y parada solo cuentan si vienen del servicio de la sesión abierta. `service_created`,
+  `service_destroyed`, `task_removed` y `trim_memory` de **cualquiera** de los dos se anotan (detalle con el
+  nombre), pero solo el servicio de la sesión la cierra al destruirse.
+- **Motivo de parada** en el detalle de `session_stop` y en `meta.json`: `user` (Detener), `completed` (Tabata
+  terminado), `service_destroyed`, `replaced` (empezó otra sesión sin parar la anterior).
+- **Estado al empezar.** Tras `session_start` se anota una vez el estado de partida con los mismos tipos que los
+  cambios y `,initial` al final del detalle: `permissions`, `ignoring_battery_optimizations`, `power_save`,
+  `device_idle`, `device_light_idle` (Android 13+), `screen_on`/`screen_off` y `app_foreground`/`app_background`.
+  Ejemplo: `screen_on;interactive=true,initial`. Las filas sin `,initial` son cambios reales.
+- **Todos los eventos se vacían al instante** (son pocos; R6 pide al menos los importantes).
+- **Hilo.** Uno «RawLog» por sesión: nace en `start` y termina en `stop`. Con el interruptor apagado no se crea.
+- **Núcleo sin Android** (`RawSessionCore`): reglas de sesión, archivos y `write_error`, probado en la JVM. La
+  parte Android (`RawSessionLogger`) solo cambia de hilo, lee el estado del móvil, registra receptores y escribe
+  `meta.json`.
+- **`meta.json` en T-02:** móvil, versión de la app, sesión, servicio, inicio/fin, motivo, zona horaria,
+  `wakelock: false`, parámetros GPS de la app (1000/500/1 m, copiados a mano porque las constantes de
+  `GpsManager` son privadas y no se toca), filas por archivo y errores. GPS propio, barómetro y batería se añaden
+  en T-03/T-04.
+
 ## 4. `gps_fused.csv`
 - `LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000)`, `setMinUpdateIntervalMillis(500)` (el
   mismo que la app, para no pedir más rápido que hoy), **sin** `setMinUpdateDistanceMeters` (0),
@@ -62,7 +87,7 @@ Si el proceso muere de golpe se pierden como mucho los últimos 5 s (lo aceptado
   rumbo, precisión de rumbo; si `hasX()` es falso → vacío. `is_mock`: `isMock` (Android 12+) o
   `isFromMockProvider`. `loc_time_ms = time`, `loc_elapsed_ns = elapsedRealtimeNanos`, `provider`.
 - `onLocationAvailability` → evento `location_available` con vaciado inmediato.
-- La conversión `Location → FusedFix` es la única parte con Android; el formato de la fila se prueba sin él.
+- La conversión `Location → LocationFix` es la única parte con Android; el formato de la fila se prueba sin él.
 
 ## 5. `baro.csv`
 - `getDefaultSensor(Sensor.TYPE_PRESSURE)`; `registerListener(listener, sensor, 200_000 µs, 0 µs, handler)`:

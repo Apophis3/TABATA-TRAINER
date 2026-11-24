@@ -13,6 +13,8 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.tuapp.tabatatrainer.MainActivity
 import com.tuapp.tabatatrainer.data.local.*
+import com.tuapp.tabatatrainer.rawlog.RawSessionCore
+import com.tuapp.tabatatrainer.rawlog.RawSessionLogger
 import com.tuapp.tabatatrainer.sensor.*
 import com.tuapp.tabatatrainer.util.Sound
 import com.tuapp.tabatatrainer.util.SoundPlayer
@@ -40,6 +42,7 @@ class WorkoutService : Service() {
     @Inject lateinit var sensorReadingDao: SensorReadingDao
     @Inject lateinit var gpsDao: GpsDao                      // ← GPS DAO INYECTADO
     @Inject lateinit var soundPlayer: SoundPlayer
+    @Inject lateinit var rawLogger: RawSessionLogger
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val binder = LocalBinder()
@@ -132,6 +135,7 @@ class WorkoutService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        rawLogger.serviceCreated(RawSessionLogger.SERVICE_WORKOUT)   // spec 008: solo guarda la hora
         createNotificationChannel()
     }
 
@@ -158,10 +162,22 @@ class WorkoutService : Service() {
     }
 
     override fun onDestroy() {
+        rawLogger.serviceDestroyed(RawSessionLogger.SERVICE_WORKOUT)   // spec 008: cierra el registro si sigue abierto
         super.onDestroy()
         serviceScope.cancel()
         stopSensors()
         soundPlayer.release()
+    }
+
+    // Spec 008 (registro en bruto): solo se anotan. Mismo comportamiento que el `Service` por defecto.
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        rawLogger.taskRemoved(RawSessionLogger.SERVICE_WORKOUT)
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        rawLogger.trimMemory(RawSessionLogger.SERVICE_WORKOUT, level)
     }
 
     // ============================================================================
@@ -260,6 +276,9 @@ class WorkoutService : Service() {
         startTimer()
         startSensors()
         updateNotification("Calentamiento", "Preparándote...")
+        if (isGpsEnabled) {   // spec 008: solo Tabata con GPS
+            rawLogger.start(RawSessionLogger.SERVICE_WORKOUT, currentSessionId!!, RawSessionLogger.ACTIVITY_TABATA)
+        }
     }
 
     fun pauseWorkout() {
@@ -268,6 +287,7 @@ class WorkoutService : Service() {
         gpsManager.pause()
         _workoutState.update { it.copy(isPaused = true) }
         updateNotification("Pausado", "Toca para continuar")
+        rawLogger.pause(RawSessionLogger.SERVICE_WORKOUT)
     }
 
     fun resumeWorkout() {
@@ -279,6 +299,7 @@ class WorkoutService : Service() {
             _workoutState.value.phase.displayName,
             "Ronda ${_workoutState.value.currentRound}/${_workoutState.value.totalRounds}"
         )
+        rawLogger.resume(RawSessionLogger.SERVICE_WORKOUT)
     }
 
     fun stopWorkout() {
@@ -550,6 +571,10 @@ class WorkoutService : Service() {
 
         _workoutState.update { it.copy(phase = WorkoutPhase.FINISHED, isRunning = false) }
         updateNotification("Entrenamiento finalizado", "¡Buen trabajo!")
+        rawLogger.stop(
+            RawSessionLogger.SERVICE_WORKOUT,
+            if (isCompleted) RawSessionCore.STOP_COMPLETED else RawSessionCore.STOP_USER
+        )
     }
 
     // ============================================================================

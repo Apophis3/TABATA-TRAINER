@@ -18,7 +18,7 @@ class RawLogExporter(private val root: File) {
      * [root] con `..` o barras). Los `sessionId` de la app son UUID.
      */
     fun sessionDir(sessionId: String): File? =
-        if (SAFE_ID.matches(sessionId)) File(root, sessionId) else null
+        if (RawFiles.isSafeSessionId(sessionId)) File(root, sessionId) else null
 
     fun exists(sessionId: String): Boolean = sessionDir(sessionId)?.isDirectory == true
 
@@ -64,9 +64,5 @@ class RawLogExporter(private val root: File) {
         } catch (_: Exception) {
             false
         }
-    }
-
-    companion object {
-        private val SAFE_ID = Regex("[A-Za-z0-9_-]+")
     }
 }

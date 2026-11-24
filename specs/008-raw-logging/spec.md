@@ -22,10 +22,11 @@ aparte, una carpeta por sesión. Lo que la app hace hoy (vueltas, estadísticas,
 no cambia.
 
 ## Requisitos
-- **R1 — Interruptor.** En Config (pantalla de configuración del Tabata) un interruptor
-  «Registro bruto (pruebas)», **apagado por defecto**, guardado en el móvil. Vale para todas las sesiones
-  siguientes: Ruta Libre siempre y Tabata solo con GPS activado. Cambiarlo con una sesión en marcha no
-  afecta a esa sesión (se decide al empezar).
+- **R1 — Interruptor.** Un interruptor «Registro bruto», **apagado por defecto**, en dos sitios que
+  comparten el mismo ajuste: la pantalla de **Ruta Libre** (solo antes de Iniciar) y Config del Tabata
+  (cambio del 2026-11-24: antes solo estaba en Config),
+  guardado en el móvil. Vale para todas las sesiones siguientes: Ruta Libre siempre y Tabata solo con GPS
+  activado. Cambiarlo con una sesión en marcha no afecta a esa sesión (se decide al empezar).
 - **R2 — Apagado = como hoy.** Con el interruptor apagado no se abre ningún archivo, no se pide ninguna
   posición extra, no se registra ningún sensor ni receptor. La app se comporta exactamente igual que antes.
 - **R3 — Ventana de registro.** Desde que empieza la sesión (Iniciar) hasta que se para (Detener) o el

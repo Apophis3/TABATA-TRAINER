@@ -23,6 +23,11 @@ object RawFiles {
     const val EVENTS = "events.csv"
     const val BATTERY = "battery.csv"
     const val META = "meta.json"
+
+    private val SAFE_SESSION_ID = Regex("[A-Za-z0-9_-]+")
+
+    /** `true` si [sessionId] vale como nombre de carpeta sin salir de `rawlog/` (los de la app son UUID). */
+    fun isSafeSessionId(sessionId: String): Boolean = SAFE_SESSION_ID.matches(sessionId)
 }
 
 /** Tipos de evento de `events.csv` (spec 008, R10). */

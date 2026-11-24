@@ -13,6 +13,8 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.tuapp.tabatatrainer.MainActivity
 import com.tuapp.tabatatrainer.data.local.*
+import com.tuapp.tabatatrainer.rawlog.RawSessionCore
+import com.tuapp.tabatatrainer.rawlog.RawSessionLogger
 import com.tuapp.tabatatrainer.sensor.*
 import com.tuapp.tabatatrainer.sensor.StepCounter
 import com.tuapp.tabatatrainer.util.Sound
@@ -173,6 +175,7 @@ class FreeRideService : Service() {
     @Inject lateinit var sensorReadingDao: SensorReadingDao
     @Inject lateinit var stepCounter: StepCounter
     @Inject lateinit var soundPlayer: SoundPlayer
+    @Inject lateinit var rawLogger: RawSessionLogger
 
     // Podómetro: último valor bruto visto y pasos de los últimos 10 s (para pasos/min)
     private var lastRawSteps: Long? = null
@@ -246,6 +249,7 @@ class FreeRideService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        rawLogger.serviceCreated(RawSessionLogger.SERVICE_FREE_RIDE)   // spec 008: solo guarda la hora
         createNotificationChannel()
         startSensorScanning()
     }
@@ -272,9 +276,21 @@ class FreeRideService : Service() {
     }
 
     override fun onDestroy() {
+        rawLogger.serviceDestroyed(RawSessionLogger.SERVICE_FREE_RIDE)   // spec 008: cierra el registro si sigue abierto
         super.onDestroy()
         serviceScope.cancel()
         stopAllTracking()
+    }
+
+    // Spec 008 (registro en bruto): solo se anotan. Mismo comportamiento que el `Service` por defecto.
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        rawLogger.taskRemoved(RawSessionLogger.SERVICE_FREE_RIDE)
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        rawLogger.trimMemory(RawSessionLogger.SERVICE_FREE_RIDE, level)
     }
 
     // ============================================================================
@@ -618,6 +634,7 @@ class FreeRideService : Service() {
         updateNotification("En Ruta", "Grabando actividad...")
 
         Log.d(TAG, "✅ Ruta iniciada: $currentSessionId")
+        rawLogger.start(RawSessionLogger.SERVICE_FREE_RIDE, currentSessionId!!, RawSessionLogger.ACTIVITY_FREE_RIDE)
     }
 
     fun pauseRide() {
@@ -630,6 +647,7 @@ class FreeRideService : Service() {
         updateNotification("Pausado", "Toca para continuar")
 
         Log.d(TAG, "⏸️ Ruta pausada")
+        rawLogger.pause(RawSessionLogger.SERVICE_FREE_RIDE)
     }
 
     fun resumeRide() {
@@ -643,6 +661,7 @@ class FreeRideService : Service() {
         updateNotification("En Ruta", "Grabando actividad...")
 
         Log.d(TAG, "▶️ Ruta reanudada")
+        rawLogger.resume(RawSessionLogger.SERVICE_FREE_RIDE)
     }
 
     /** Finaliza la ruta; [onSaved] se llama cuando las estadísticas ya están en la DB */
@@ -663,6 +682,7 @@ class FreeRideService : Service() {
         paceCalculator.reset()
         _stats.update { it.copy(isRunning = false, isPaused = false, paceSecPerKm = null) }
         updateNotification("Ruta Finalizada", "¡Buen trabajo!")
+        rawLogger.stop(RawSessionLogger.SERVICE_FREE_RIDE, RawSessionCore.STOP_USER)
     }
 
     /**
