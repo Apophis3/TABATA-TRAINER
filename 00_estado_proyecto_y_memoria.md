@@ -6,6 +6,20 @@ memoria privada de Claude. **Lo más reciente arriba.**
 
 ---
 
+## 2026-11-24 — Spec 008 · T-04 `baro.csv` y `battery.csv` (hecha, 323/323)
+- `RawBaroRecorder` (puro) + `RawBaroSource` (Android): barómetro a 200 ms sin lotes, una fila cada ≥ 950 ms,
+  contadores y datos del sensor a `meta.json`; sin barómetro → `source_error` y sin archivo.
+- `RawBatteryRecorder` (puro) + `RawBatterySource` (Android): lectura al empezar, cada 60 s (`postDelayed`, sin
+  WakeLock), en cada encendido/apagado de pantalla y al parar; cada fila al disco al instante.
+- `RawSessionLogger`: arranca y para las tres fuentes por separado; `meta.json` + `baro` y `battery`.
+- Tests +13 → suite esperada **323**. Plan §5.1 y §6.1. Falta: compilar, test y Ruta de 5 min (usuario).
+- Prueba (1.6.155, S22 Ultra, sesión f2dc38ee, 4,5 min, pantalla apagada 1 min 46 s): suite **323/323**.
+  `baro.csv` 269 filas, una por segundo también con la pantalla apagada (ningún hueco > 1,5 s); el sensor dio
+  ~10 muestras/s aunque se pidieron 5 (2683 recibidas, 2414 descartadas). `battery.csv` 8 filas: start, 4
+  periodic (cada 60,0 s también con pantalla apagada), screen_off, screen_on, stop (la última). `current_now_ua`
+  entre −257 y −1959: en este Samsung parece venir en mA, no en µA (se guarda crudo, R-4). `gps_fused` sin huecos
+  > 1,5 s. 0 errores; `meta.json` cuadra con los archivos.
+
 ## 2026-11-24 — Spec 008 · T-03 `gps_fused.csv` (hecha, 310/310)
 - `RawFusedRecorder` (Kotlin puro): abre `gps_fused.csv`, una fila por posición de cada resultado con la misma hora
   de llegada y `batch_index`/`batch_size`, `source_started`/`source_error`/`location_available` (detalle `true`/`false`)

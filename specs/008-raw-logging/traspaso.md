@@ -2,7 +2,24 @@
 
 Documento para continuar en un hilo nuevo (texto de arranque: el que da el agente en el chat).
 
-## Siguiente (2026-11-24): T-04 `baro.csv` y `battery.csv`
+## Siguiente (2026-11-24): T-05 Exportar (solo cuando el usuario lo diga)
+- **T-04 hecha** (probada 323/323, commit). Ver abajo. Visto en la prueba: saltos de GPS al empezar inflan el
+  ritmo y la distancia de la app; anotado para la spec 009 (plan §11), no se toca en esta.
+
+## Anterior: T-04 `baro.csv` y `battery.csv`
+- **Hecho:** T-03 con commit (1b27f34, 310/310). T-04 con código y tests escritos, **sin compilar ni commit**:
+  `rawlog/RawBaroRecorder.kt`, `RawBaroSource.kt`, `RawBatteryRecorder.kt`, `RawBatterySource.kt`; en
+  `RawSessionLogger` las tres fuentes y `baro`/`battery` en `meta.json` (plan §5.1 y §6.1). Suite esperada **323**.
+- **Falta (usuario):** test, instalar y Ruta de 5 min con 2 min de pantalla apagada. El agente lee `baro.csv`,
+  `battery.csv`, `events.csv` y `meta.json` por `adb run-as` y Logcat «RawLog».
+- Prueba (1.6.155, S22 Ultra, sesión f2dc38ee, 4,5 min, pantalla apagada 1 min 46 s): suite **323/323**.
+  `baro.csv` 269 filas, una por segundo también con la pantalla apagada (ningún hueco > 1,5 s); el sensor dio
+  ~10 muestras/s aunque se pidieron 5 (2683 recibidas, 2414 descartadas). `battery.csv` 8 filas: start, 4
+  periodic (cada 60,0 s también con pantalla apagada), screen_off, screen_on, stop (la última). `current_now_ua`
+  entre −257 y −1959: en este Samsung parece venir en mA, no en µA (se guarda crudo, R-4). `gps_fused` sin huecos
+  > 1,5 s. 0 errores; `meta.json` cuadra con los archivos.
+
+## Anterior: T-03 `gps_fused.csv`
 - **Hecho:** T-01 y T-02 con commit (d53298f), suite **301/301**. T-03 con código escrito y **sin compilar ni
   commit**: `rawlog/RawFusedRecorder.kt` (Kotlin puro), `rawlog/RawFusedSource.kt` (petición Fused propia y
   `Location → LocationFix`), y en `RawSessionLogger` `startSources`/`stopSources` + `raw_gps_params` y `fused` en

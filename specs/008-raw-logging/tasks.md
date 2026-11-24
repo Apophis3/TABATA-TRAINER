@@ -34,8 +34,16 @@ Gradle ni `adb install` (Clave 5). **Ninguna tarea empieza hasta que el usuario 
   andar:** la petición propia hace que la app reciba más puntos.
   Hecha (2026-11-24): el usuario acepta el efecto (petición activa; R8 y plan §8 actualizados; `observer_effect`
   en `meta.json`, añadido después de la prueba).
-- [ ] T-04 **`baro.csv` y `battery.csv`.** `RawBaroSource`, `RawBatterySource` (60 s + pantalla + inicio/fin).
+- [x] T-04 **`baro.csv` y `battery.csv`.** `RawBaroSource`, `RawBatterySource` (60 s + pantalla + inicio/fin).
   Evidencia: Ruta de 5 min con un apagado de pantalla de 2 min; cabeceras y primeras filas de ambos.
+  Estado (2026-11-24): código y tests escritos (`RawBaroRecorder/Source`, `RawBatteryRecorder/Source`, +13 tests →
+  **323**); **sin compilar ni probar** (lo hace el usuario).
+  Prueba (1.6.155, S22 Ultra, sesión f2dc38ee, 4,5 min, pantalla apagada 1 min 46 s): suite **323/323**.
+  `baro.csv` 269 filas, una por segundo también con la pantalla apagada (ningún hueco > 1,5 s); el sensor dio
+  ~10 muestras/s aunque se pidieron 5 (2683 recibidas, 2414 descartadas). `battery.csv` 8 filas: start, 4
+  periodic (cada 60,0 s también con pantalla apagada), screen_off, screen_on, stop (la última). `current_now_ua`
+  entre −257 y −1959: en este Samsung parece venir en mA, no en µA (se guarda crudo, R-4). `gps_fused` sin huecos
+  > 1,5 s. 0 errores; `meta.json` cuadra con los archivos.
 - [ ] T-05 **Exportar.** Bloque en el detalle de sesión: ruta, tamaño y «Compartir registro bruto» (zip por el
   `FileProvider`). Borrado de la carpeta con la sesión (R14, aprobado).
   Evidencia: el zip abierto en el PC.

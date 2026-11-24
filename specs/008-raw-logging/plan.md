@@ -118,7 +118,17 @@ Si el proceso muere de golpe se pierden como mucho los últimos 5 s (lo aceptado
   tarde seguida de otra 40 ms pronto deja 920 ms entre ellas y el filtro de 950 ms perdería una. Pidiéndolas más
   rápido siempre hay una muestra disponible pasados los 950 ms, y el archivo queda en una por segundo.
 
-## 6. `battery.csv`, `events.csv` y `meta.json`
+### 5.1 Detalles fijados al hacer T-04
+- **Dos clases**, como Fused: `RawBaroRecorder` (Kotlin puro: archivo, filtro de 950 ms, eventos, datos del
+  sensor) y `RawBaroSource` (Android: `android.hardware.SensorManager`, no el `SensorManager` de la app).
+- **Sin barómetro:** `source_error` `reason=no_pressure_sensor` y **sin** archivo; `meta.json` → `baro.available=false`.
+  Si Android no acepta el registro: `source_error` `reason=register_listener_false` (o la excepción).
+- **`source_started`:** `file=baro.csv;sampling_period_us=200000;max_report_latency_us=0;min_gap_ms=950`.
+- Filas al búfer de 5 s (como `gps_fused`). `accuracy` de cada muestra tal cual.
+- **`meta.json`:** + `baro` (`available`, `name`, `vendor`, `max_range_hpa`, `resolution_hpa`, `min_delay_us`,
+  `fifo_max_event_count`, lo pedido, `min_gap_ms`, `samples_received/written/discarded`, `error`).
+- El sensor se quita al parar, antes de anotar `session_stop`, en todas las salidas. En pausa **no** (R3).
+
 - Batería: `level_pct` = `BatteryManager.getIntProperty(BATTERY_PROPERTY_CAPACITY)` (Android ya lo da en %,
   así no se divide nada). Del `ACTION_BATTERY_CHANGED` pegajoso: temperatura en décimas de °C, `status` y
   `plugged` como números de Android. `getIntProperty(CHARGE_COUNTER)` y `getLongProperty(CURRENT_NOW)`;
@@ -139,6 +149,17 @@ Si el proceso muere de golpe se pierden como mucho los últimos 5 s (lo aceptado
 - `meta.json`: escrito a mano con `org.json.JSONObject` (incluido en Android, no es dependencia nueva).
   Versión de la app con `packageManager.getPackageInfo` (no depende de `BuildConfig`). Nota fija:
   «current_now_ua: valor crudo de BatteryManager; en Samsung la unidad y el signo pueden variar».
+
+### 6.1 Detalles fijados al hacer T-04 (batería)
+- **Dos clases:** `RawBatteryRecorder` (Kotlin puro) y `RawBatterySource` (Android).
+- **Cuándo:** `start` al abrir, `periodic` cada 60 s (`postDelayed` en el hilo «RawLog», sin alarma ni WakeLock),
+  `screen_on`/`screen_off` desde el mismo receptor que escribe el evento de pantalla, y `stop` al parar, **antes**
+  de cerrar la sesión (así queda escrita).
+- Cada fila se vacía **al instante** (son pocas y así no se pierden si el móvil duerme).
+- `screen_on` de cada fila: `PowerManager.isInteractive` en ese momento. Datos ausentes → vacío.
+- **`source_started`:** `file=battery.csv;period_ms=60000;triggers=start,periodic,screen_on,screen_off,stop`.
+- **`meta.json`:** + `battery` (`period_ms`, `started`, `rows_by_trigger`, `note` con el aviso de la corriente).
+- Línea de Logcat al cerrar: + `baro=escritas/recibidas` y `bateria={motivo=filas}`.
 
 ## 7. Impacto en servicios y navegación (Clave 3, Graph Lineage)
 - `NavGraph.kt`: **no se toca.** La pantalla de detalle de sesión ya existe; solo gana un bloque.
@@ -185,6 +206,7 @@ Si el proceso muere de golpe se pierden como mucho los últimos 5 s (lo aceptado
 - `BaroDecimatorTest`: con muestras cada 200 ms escribe una por segundo; con 1 Hz con retrasos de ±40 ms no
   pierde ninguna; cuenta descartadas.
 - `RawLogExporterTest`: el zip contiene los archivos con el mismo contenido; tamaño de carpeta.
+- T-04: `RawBaroRecorderTest` (+7) y `RawBatteryRecorderTest` (+6) → suite **323**.
 - Suite esperada: **243 + los nuevos** (se dirá el número exacto en cada tarea).
 
 ## 10. Decisiones del usuario (2026-11-24)
@@ -208,3 +230,8 @@ Con los datos de esta spec, probablemente convenga en `GpsManager`:
 - Vaciar el búfer de puntos en `onDestroy`.
 - Decidir WakeLock / exclusión de ahorro solo si los datos de pantalla apagada muestran cortes.
 - Arreglar GPX: omitir `<ele>` sin altitud y llevar la velocidad a `<extensions>`.
+- **Saltos al empezar (visto en T-04, 2026-11-24):** el usuario ve un ritmo de ~2:00/km andando en los primeros
+  segundos. Causa medida: Fused da un salto de posición (sesión f2dc38ee, a los 23–25 s: 41 m y 17 m en 2 s con
+  su propia velocidad en 1,0–1,4 m/s y la precisión empeorando de 5 a 8 m); la app lo suma a la distancia y el
+  ritmo de 10 s sale a ~2:00. También en f04787cd (11–16 s, ~60 m). La sesión total sale ~15 % larga.
+  Propuesta: no sumar un tramo cuya velocidad implícita supere con mucho la que da el GPS (o la precisión).

@@ -44,6 +44,10 @@ class RawSessionLogger @Inject constructor(
         var lastIgnoringOptimizations: Boolean? = null
         var fused: RawFusedSource? = null
         var fusedRecorder: RawFusedRecorder? = null
+        var baro: RawBaroSource? = null
+        var baroRecorder: RawBaroRecorder? = null
+        var battery: RawBatterySource? = null
+        var batteryRecorder: RawBatteryRecorder? = null
     }
 
     private val lock = Any()
@@ -189,7 +193,12 @@ class RawSessionLogger @Inject constructor(
                     "Fin: sesión=${s.core.sessionId} motivo=${s.core.stopReason} filas=" +
                         s.core.fileStats().entries.joinToString { "${it.key}:${it.value.rows}" } +
                         " errores=${s.core.writeErrors}" +
-                        (s.fusedRecorder?.let { " fused=${it.resultsReceived}r/${it.locationsReceived}p" } ?: "")
+                        (s.fusedRecorder?.let { " fused=${it.resultsReceived}r/${it.locationsReceived}p" } ?: "") +
+                        (s.baroRecorder?.let { r ->
+                            val d = r.decimator
+                            " baro=${d.written}/${d.received}" + (r.lastError?.let { e -> "($e)" } ?: "")
+                        } ?: "") +
+                        (s.batteryRecorder?.let { " bateria=${it.rowsByTrigger}" } ?: "")
                 )
             }
         }
@@ -197,22 +206,47 @@ class RawSessionLogger @Inject constructor(
         s.thread.quitSafely()
     }
 
-    // ---------------------------------------------------------------- fuentes (T-03: Fused)
+    // ---------------------------------------------------------------- fuentes (T-03 Fused, T-04 barómetro y batería)
 
-    /** En el hilo «RawLog», solo con la sesión ya abierta (interruptor encendido). */
+    /** En el hilo «RawLog», solo con la sesión ya abierta (interruptor encendido). Cada fuente, por separado. */
     private fun startSources(s: Active) {
-        val recorder = RawFusedRecorder(s.core)
-        val source = RawFusedSource(context, s.handler, recorder, ::now)
-        s.fusedRecorder = recorder
-        s.fused = source
-        safely("fused.start") { source.start() }
+        val fusedRecorder = RawFusedRecorder(s.core)
+        val fused = RawFusedSource(context, s.handler, fusedRecorder, ::now)
+        s.fusedRecorder = fusedRecorder
+        s.fused = fused
+        safely("fused.start") { fused.start() }
+
+        val baroRecorder = RawBaroRecorder(s.core)
+        val baro = RawBaroSource(context, s.handler, baroRecorder, ::now)
+        s.baroRecorder = baroRecorder
+        s.baro = baro
+        safely("baro.start") { baro.start() }
+
+        val batteryRecorder = RawBatteryRecorder(s.core)
+        val battery = RawBatterySource(context, s.handler, batteryRecorder, ::now) { powerManager?.isInteractive }
+        s.batteryRecorder = batteryRecorder
+        s.battery = battery
+        safely("battery.start") { battery.start() }
     }
 
+    /**
+     * Antes de cerrar la sesión (así la lectura `stop` de batería aún se escribe). Cada fuente, por separado:
+     * si una falla, las demás se quitan igual.
+     */
     private fun stopSources(s: Active) {
-        val source = s.fused ?: return
-        s.fused = null
-        source.stop()
-        Log.i(TAG, "Fused: petición quitada (sesión ${s.core.sessionId})")
+        s.fused?.let { source ->
+            s.fused = null
+            safely("fused.stop") { source.stop() }
+            Log.i(TAG, "Fused: petición quitada (sesión ${s.core.sessionId})")
+        }
+        s.baro?.let { source ->
+            s.baro = null
+            safely("baro.stop") { source.stop() }
+        }
+        s.battery?.let { source ->
+            s.battery = null
+            safely("battery.stop") { source.stop() }
+        }
     }
 
     // ---------------------------------------------------------------- estado del móvil
@@ -292,6 +326,7 @@ class RawSessionLogger @Inject constructor(
             Intent.ACTION_SCREEN_ON, Intent.ACTION_SCREEN_OFF -> {
                 val type = if (action == Intent.ACTION_SCREEN_ON) RawEventType.SCREEN_ON else RawEventType.SCREEN_OFF
                 s.core.event(stamp, type, "interactive=${pm.isInteractive}")
+                s.battery?.onScreen(action == Intent.ACTION_SCREEN_ON)
                 if (action == Intent.ACTION_SCREEN_ON) {
                     // Sin aviso del sistema para este: se vuelve a mirar en cada encendido y se anota si cambió.
                     val ignoring = pm.isIgnoringBatteryOptimizations(context.packageName)
@@ -370,6 +405,35 @@ class RawSessionLogger @Inject constructor(
                         put("results_received", r.resultsReceived)
                         put("locations_received", r.locationsReceived)
                         put("error", r.lastError ?: JSONObject.NULL)
+                    })
+                }
+                s.baroRecorder?.let { r ->
+                    put("baro", JSONObject().apply {
+                        put("available", r.available ?: JSONObject.NULL)
+                        r.sensorInfo?.let { i ->
+                            put("name", i.name ?: JSONObject.NULL)
+                            put("vendor", i.vendor ?: JSONObject.NULL)
+                            put("max_range_hpa", i.maxRangeHpa.toDouble())
+                            put("resolution_hpa", i.resolutionHpa.toDouble())
+                            put("min_delay_us", i.minDelayUs)
+                            put("fifo_max_event_count", i.fifoMaxEvents)
+                        }
+                        put("requested_sampling_period_us", RawBaroSource.SAMPLING_PERIOD_US)
+                        put("max_report_latency_us", RawBaroSource.MAX_REPORT_LATENCY_US)
+                        put("min_gap_ms", BaroDecimator.DEFAULT_MIN_GAP_NS / 1_000_000)
+                        put("started", r.started)
+                        put("samples_received", r.decimator.received)
+                        put("samples_written", r.decimator.written)
+                        put("samples_discarded", r.decimator.discarded)
+                        put("error", r.lastError ?: JSONObject.NULL)
+                    })
+                }
+                s.batteryRecorder?.let { r ->
+                    put("battery", JSONObject().apply {
+                        put("period_ms", RawBatterySource.PERIOD_MS)
+                        put("started", r.started)
+                        put("rows_by_trigger", JSONObject().apply { r.rowsByTrigger.forEach { (k, v) -> put(k, v) } })
+                        put("note", RawBatterySource.CURRENT_NOTE)
                     })
                 }
                 put("files", JSONObject().apply {
