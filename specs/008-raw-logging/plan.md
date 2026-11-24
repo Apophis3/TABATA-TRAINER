@@ -161,6 +161,22 @@ Si el proceso muere de golpe se pierden como mucho los últimos 5 s (lo aceptado
 - **`meta.json`:** + `battery` (`period_ms`, `started`, `rows_by_trigger`, `note` con el aviso de la corriente).
 - Línea de Logcat al cerrar: + `baro=escritas/recibidas` y `bateria={motivo=filas}`.
 
+### 6.2 Detalles fijados al hacer T-05 (exportar y borrar)
+- **`RawLogExporter`** (Kotlin puro) gana: `zipName(id)` = `rawlog_<id>.zip`; `clearOldZips(cacheDir)` borra
+  solo los archivos de primer nivel de la caché que empiezan por `rawlog_` y acaban en `.zip` (nada más de la
+  caché); `exportZip(id, cacheDir)` = borrar los viejos y crear el nuevo; `formatSize(bytes)` en español
+  («850 B», «12,4 KB», «1,2 MB»). Lo da Hilt (`AppModule`, `@Singleton`, raíz `filesDir/rawlog`).
+- **Detalle de sesión:** el `SessionDetailViewModel` calcula al cargar `RawLogInfo` (ruta completa de la
+  carpeta y tamaño) en `Dispatchers.IO`; `null` si no hay carpeta → no se dibuja nada. Tarjeta «Registro
+  bruto» tras la de Exportar: ruta, tamaño y botón «Compartir registro bruto» (desactivado mientras comprime).
+  El zip se crea en el ViewModel (`Dispatchers.IO`); la pantalla solo lo comparte con
+  `ExportUtils.shareFile(context, zip, "application/zip")`. Si falla: Toast «Error al crear el zip».
+- **R14:** `SessionDeletion.deleteWithChildren` gana `deleteRawLog` (obligatorio, sin valor por defecto) y lo
+  llama **antes** de borrar la sesión, como los demás hijos (si algo falla, la sesión sigue visible). Lo pasan
+  los dos sitios que borran: Historial y Detalle. El borrado de la carpeta va en `Dispatchers.IO`.
+- Tests: `RawLogExporterTest` +4 (nombre, limpieza sin tocar otros archivos, `exportZip` deja un solo zip,
+  tamaño en español) y `LapExportTest` ajustado (5 pasos, `rawlog` antes de `session`) → suite **327**.
+
 ## 7. Impacto en servicios y navegación (Clave 3, Graph Lineage)
 - `NavGraph.kt`: **no se toca.** La pantalla de detalle de sesión ya existe; solo gana un bloque.
 - `FreeRideService` / `WorkoutService` — cambios exactos:

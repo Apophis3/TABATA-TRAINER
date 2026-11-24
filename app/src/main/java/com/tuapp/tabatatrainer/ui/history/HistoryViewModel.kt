@@ -7,9 +7,12 @@ import com.tuapp.tabatatrainer.data.local.SensorReadingDao
 import com.tuapp.tabatatrainer.data.local.SessionDao
 import com.tuapp.tabatatrainer.util.laps.SessionDeletion
 import com.tuapp.tabatatrainer.data.local.WorkoutSessionEntity
+import com.tuapp.tabatatrainer.rawlog.RawLogExporter
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 data class HistoryStats(
@@ -22,7 +25,8 @@ data class HistoryStats(
 class HistoryViewModel @Inject constructor(
     private val sessionDao: SessionDao,
     private val gpsDao: GpsDao,
-    private val sensorReadingDao: SensorReadingDao
+    private val sensorReadingDao: SensorReadingDao,
+    private val rawLogExporter: RawLogExporter
 ) : ViewModel() {
 
     val sessions: StateFlow<List<WorkoutSessionEntity>> = sessionDao
@@ -60,6 +64,7 @@ class HistoryViewModel @Inject constructor(
                 deleteLaps = { gpsDao.deleteLapsForSession(session.id) },
                 deleteGpsPoints = { gpsDao.deletePointsForSession(session.id) },
                 deleteSensorReadings = { sensorReadingDao.deleteReadingsForSession(session.id) },
+                deleteRawLog = { withContext(Dispatchers.IO) { rawLogExporter.delete(session.id) } },
                 deleteSession = { sessionDao.deleteSession(session) }
             )
             loadStats()

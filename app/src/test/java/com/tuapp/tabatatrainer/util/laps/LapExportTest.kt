@@ -100,12 +100,14 @@ class LapExportTest {
                 deleteLaps = { calls += "laps" },
                 deleteGpsPoints = { calls += "gps" },
                 deleteSensorReadings = { calls += "readings" },
+                deleteRawLog = { calls += "rawlog" },
                 deleteSession = { calls += "session" }
             )
         }
         assertTrue("laps" in calls)
+        assertTrue("rawlog" in calls)
         assertEquals("session", calls.last())
-        assertEquals(4, calls.size)
+        assertEquals(5, calls.size)
     }
 
     @Test
@@ -117,6 +119,7 @@ class LapExportTest {
                     deleteLaps = { calls += "laps" },
                     deleteGpsPoints = { error("fallo de disco") },
                     deleteSensorReadings = { calls += "readings" },
+                    deleteRawLog = { calls += "rawlog" },
                     deleteSession = { calls += "session" }
                 )
             }

@@ -44,9 +44,18 @@ Gradle ni `adb install` (Clave 5). **Ninguna tarea empieza hasta que el usuario 
   periodic (cada 60,0 s también con pantalla apagada), screen_off, screen_on, stop (la última). `current_now_ua`
   entre −257 y −1959: en este Samsung parece venir en mA, no en µA (se guarda crudo, R-4). `gps_fused` sin huecos
   > 1,5 s. 0 errores; `meta.json` cuadra con los archivos.
-- [ ] T-05 **Exportar.** Bloque en el detalle de sesión: ruta, tamaño y «Compartir registro bruto» (zip por el
+- [x] T-05 **Exportar.** Bloque en el detalle de sesión: ruta, tamaño y «Compartir registro bruto» (zip por el
   `FileProvider`). Borrado de la carpeta con la sesión (R14, aprobado).
   Evidencia: el zip abierto en el PC.
+  Estado (2026-11-24): código y tests escritos (plan §6.2), **sin compilar ni probar**. `RawLogExporter` +
+  `exportZip`/`clearOldZips`/`zipName`/`formatSize`; tarjeta «Registro bruto» en el detalle; `SessionDeletion`
+  con `deleteRawLog` en Historial y Detalle. Tests +4 → suite esperada **327**.
+  Prueba parcial (1.6.157, S22 Ultra): suite **327/327**. Zip de f2dc38ee compartido a Proton Drive y abierto
+  en el PC: 5 archivos (`baro` 269 filas, `battery` 8, `events` 17, `gps_fused` 383, `meta.json`), `;` y punto
+  decimal (A6 bien). En la caché del móvil queda un solo `rawlog_*.zip`. Falta: tarjeta oculta en una sesión sin
+  carpeta y borrado de una sesión con carpeta (R14).
+  Hecha (2026-11-24): sin tarjeta en la sesión 19:59 (sin carpeta), confirmado por el usuario. Borrada la sesión
+  2cb8865f (18:11): su carpeta ya no está en `files/rawlog/` y Room no tiene ni la sesión ni sus puntos (R14 bien).
 - [ ] T-06 **Prueba de campo (usuario).** Paseo y salida con 30 min de pantalla apagada (A1–A6). La parte de
   pantalla apagada se hace **dos veces**: sin excluir la app del ahorro de batería y excluyéndola a mano en
   Ajustes; `events.csv` debe traer `ignoring_battery_optimizations` al empezar en las dos.

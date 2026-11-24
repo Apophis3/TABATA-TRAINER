@@ -81,6 +81,57 @@ class RawLogExporterTest {
     }
 
     @Test
+    fun zip_name_is_rawlog_underscore_id() {
+        assertEquals("rawlog_$id.zip", RawLogExporter.zipName(id))
+    }
+
+    @Test
+    fun clearing_old_zips_leaves_other_cache_files_alone() {
+        val cache = tmp.newFolder("cache")
+        File(cache, "rawlog_viejo1.zip").writeText("x")
+        File(cache, "rawlog_viejo2.zip").writeText("y")
+        val excel = File(cache, "sesion.xlsx").apply { writeText("e") }
+        val otherZip = File(cache, "otro.zip").apply { writeText("o") }
+        val sub = File(cache, "sub").apply { mkdirs() }
+        val nested = File(sub, "rawlog_dentro.zip").apply { writeText("n") }
+
+        assertEquals(2, RawLogExporter.clearOldZips(cache))
+        assertEquals(setOf("sesion.xlsx", "otro.zip", "sub"), cache.list()!!.toSet())
+        assertTrue(excel.exists())
+        assertTrue(otherZip.exists())
+        assertTrue(nested.exists())
+        assertEquals(0, RawLogExporter.clearOldZips(File(tmp.root, "no_existe")))
+    }
+
+    @Test
+    fun export_zip_replaces_old_zips_and_keeps_only_the_new_one() {
+        val (exporter, _) = exporterWithSession()
+        val cache = tmp.newFolder("cache")
+        File(cache, "rawlog_otra-sesion.zip").writeText("viejo")
+        val keep = File(cache, "notas.txt").apply { writeText("k") }
+
+        val out = exporter.exportZip(id, cache)
+        assertNotNull(out)
+        assertEquals(File(cache, "rawlog_$id.zip"), out)
+        assertEquals(setOf("rawlog_$id.zip", "notas.txt"), cache.list()!!.toSet())
+        assertTrue(keep.exists())
+        ZipFile(out!!).use { assertEquals(3, it.size()) }
+
+        // Sin carpeta de sesión no se crea nada ni se borra nada.
+        assertNull(exporter.exportZip("otra", cache))
+        assertTrue(File(cache, "rawlog_$id.zip").exists())
+    }
+
+    @Test
+    fun size_is_formatted_in_spanish() {
+        assertEquals("0 B", RawLogExporter.formatSize(0))
+        assertEquals("850 B", RawLogExporter.formatSize(850))
+        assertEquals("1,0 KB", RawLogExporter.formatSize(1024))
+        assertEquals("12,4 KB", RawLogExporter.formatSize(12_698))
+        assertEquals("1,2 MB", RawLogExporter.formatSize(1_258_291))
+    }
+
+    @Test
     fun unsafe_ids_are_rejected() {
         val (exporter, _) = exporterWithSession()
         val outside = tmp.newFile("secreto.txt")

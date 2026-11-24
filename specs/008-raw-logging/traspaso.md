@@ -2,7 +2,22 @@
 
 Documento para continuar en un hilo nuevo (texto de arranque: el que da el agente en el chat).
 
-## Siguiente (2026-11-24): T-05 Exportar (solo cuando el usuario lo diga)
+## Siguiente (2026-11-24): T-06 Prueba de campo (solo cuando el usuario lo diga)
+- **T-05 hecha** (1.6.157, 327/327): zip de f2dc38ee abierto en el PC (A6 bien), un solo zip en la caché,
+  sin tarjeta en sesiones sin carpeta, y borrar la sesión 2cb8865f borró su carpeta (R14).
+
+## Anterior: T-05 Exportar
+- **Hecho (sin compilar ni commit):** plan §6.2. `RawLogExporter`: `exportZip(id, cacheDir)` (borra los
+  `rawlog_*.zip` de primer nivel y crea `rawlog_<id>.zip`), `clearOldZips`, `zipName`, `formatSize` («1,2 MB»).
+  Lo da Hilt (`AppModule`). `SessionDetailViewModel`: `rawLog` (ruta y tamaño, `null` sin carpeta) y
+  `buildRawLogZip()` en `Dispatchers.IO`; tarjeta «Registro bruto» tras Exportar con «Compartir registro bruto»
+  (`application/zip` por el `FileProvider`). R14: `SessionDeletion.deleteWithChildren(deleteRawLog = …)`
+  obligatorio, antes de borrar la sesión; lo pasan Historial y Detalle. Tests +4 → **327**.
+- **Falta (usuario):** test, instalar y la prueba (compartir dos veces, abrir el zip en el PC, borrar una sesión
+  con carpeta). El agente comprueba por `adb run-as` la caché (un solo zip) y `files/rawlog/` tras borrar.
+- **Sin tocar:** `GpsManager`, entidades Room, `NavGraph.kt`, servicios, `SensorManager`, Gradle.
+
+## Anterior: arranque de T-05 Exportar
 - **T-04 hecha** (probada 323/323, commit). Ver abajo. Visto en la prueba: saltos de GPS al empezar inflan el
   ritmo y la distancia de la app; anotado para la spec 009 (plan §11), no se toca en esta.
 

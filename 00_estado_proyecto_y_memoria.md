@@ -6,6 +6,15 @@ memoria privada de Claude. **Lo más reciente arriba.**
 
 ---
 
+## 2026-11-24 — Spec 008 · T-05 Exportar (hecha, 327/327)
+- Detalle de sesión: tarjeta «Registro bruto» (ruta, tamaño, «Compartir registro bruto») solo si existe la
+  carpeta; el zip `rawlog_<id>.zip` se crea en la caché tras borrar los viejos y se comparte por el `FileProvider`.
+- R14: borrar una sesión (Historial o Detalle) borra también `files/rawlog/<id>/` (`SessionDeletion`).
+- Plan §6.2. Tests +4 → suite esperada **327**.
+- Prueba (1.6.157, S22 Ultra): suite **327/327**. Zip de f2dc38ee compartido a Proton Drive: 5 archivos, `;` y
+  punto decimal (A6 bien); un solo zip en la caché. Sesión sin carpeta (19:59): sin tarjeta. Borrada 2cb8865f:
+  carpeta y datos de Room fuera (R14 bien).
+
 ## 2026-11-24 — Spec 008 · T-04 `baro.csv` y `battery.csv` (hecha, 323/323)
 - `RawBaroRecorder` (puro) + `RawBaroSource` (Android): barómetro a 200 ms sin lotes, una fila cada ≥ 950 ms,
   contadores y datos del sensor a `meta.json`; sin barómetro → `source_error` y sin archivo.

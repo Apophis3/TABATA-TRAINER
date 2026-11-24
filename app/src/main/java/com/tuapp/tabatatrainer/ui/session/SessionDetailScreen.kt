@@ -1,5 +1,6 @@
 package com.tuapp.tabatatrainer.ui.session
 
+import android.content.Context
 import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.Canvas
@@ -31,22 +32,32 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tuapp.tabatatrainer.data.local.*
+import com.tuapp.tabatatrainer.rawlog.RawLogExporter
 import com.tuapp.tabatatrainer.util.ExportUtils
 import com.tuapp.tabatatrainer.util.laps.ManualLapSummary
 import com.tuapp.tabatatrainer.util.laps.SessionDeletion
 import com.tuapp.tabatatrainer.util.laps.SessionLapSummaryModel
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
+
+/** Carpeta del registro en bruto de la sesión (spec 008, R13): ruta completa y tamaño en bytes. */
+data class RawLogInfo(val path: String, val sizeBytes: Long)
 
 @HiltViewModel
 class SessionDetailViewModel @Inject constructor(
     private val sessionDao: SessionDao,
     private val sensorReadingDao: SensorReadingDao,
-    private val gpsDao: GpsDao
+    private val gpsDao: GpsDao,
+    private val rawLogExporter: RawLogExporter,
+    @ApplicationContext private val appContext: Context
 ) : ViewModel() {
 
     private val _session = MutableStateFlow<WorkoutSessionEntity?>(null)
@@ -61,13 +72,31 @@ class SessionDetailViewModel @Inject constructor(
     private val _laps = MutableStateFlow<List<LapEntity>>(emptyList())
     val laps: StateFlow<List<LapEntity>> = _laps.asStateFlow()
 
+    /** `null` si la sesión no tiene carpeta de registro en bruto: entonces no se muestra nada (R13). */
+    private val _rawLog = MutableStateFlow<RawLogInfo?>(null)
+    val rawLog: StateFlow<RawLogInfo?> = _rawLog.asStateFlow()
+
     fun loadSession(sessionId: String) {
         viewModelScope.launch {
             _session.value = sessionDao.getSessionById(sessionId)
             _readings.value = sensorReadingDao.getReadingsForSessionSync(sessionId)
             _gpsPoints.value = gpsDao.getPointsForSessionSync(sessionId)
             _laps.value = gpsDao.getLapsForSessionSync(sessionId)
+            _rawLog.value = withContext(Dispatchers.IO) {
+                rawLogExporter.sessionDir(sessionId)
+                    ?.takeIf { it.isDirectory }
+                    ?.let { RawLogInfo(it.absolutePath, rawLogExporter.sizeBytes(sessionId)) }
+            }
         }
+    }
+
+    /**
+     * Zip de la carpeta en la caché (`rawlog_<id>.zip`), borrando antes los viejos (R13). `null` si no hay
+     * carpeta o falla.
+     */
+    suspend fun buildRawLogZip(): File? {
+        val id = _session.value?.id ?: return null
+        return withContext(Dispatchers.IO) { rawLogExporter.exportZip(id, appContext.cacheDir) }
     }
 
     fun deleteSession(onDeleted: () -> Unit) {
@@ -77,6 +106,7 @@ class SessionDetailViewModel @Inject constructor(
                     deleteLaps = { gpsDao.deleteLapsForSession(session.id) },
                     deleteGpsPoints = { gpsDao.deletePointsForSession(session.id) },
                     deleteSensorReadings = { sensorReadingDao.deleteReadingsForSession(session.id) },
+                    deleteRawLog = { withContext(Dispatchers.IO) { rawLogExporter.delete(session.id) } },
                     deleteSession = { sessionDao.deleteSession(session) }
                 )
                 onDeleted()
@@ -119,10 +149,12 @@ fun SessionDetailScreen(
     val readings by viewModel.readings.collectAsState()
     val gpsPoints by viewModel.gpsPoints.collectAsState()
     val laps by viewModel.laps.collectAsState()
+    val rawLog by viewModel.rawLog.collectAsState()
 
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showNotesDialog by remember { mutableStateOf(false) }
     var isExporting by remember { mutableStateOf(false) }
+    var isZippingRawLog by remember { mutableStateOf(false) }
 
     LaunchedEffect(sessionId) {
         viewModel.loadSession(sessionId)
@@ -249,6 +281,27 @@ fun SessionDetailScreen(
                         }
                     }
                 )
+
+                // Registro en bruto (spec 008, R13): solo si la sesión tiene carpeta
+                rawLog?.let { info ->
+                    Spacer(modifier = Modifier.height(16.dp))
+                    RawLogCard(
+                        info = info,
+                        isZipping = isZippingRawLog,
+                        onShare = {
+                            coroutineScope.launch {
+                                isZippingRawLog = true
+                                val zip = viewModel.buildRawLogZip()
+                                isZippingRawLog = false
+                                if (zip != null) {
+                                    ExportUtils.shareFile(context, zip, "application/zip")
+                                } else {
+                                    Toast.makeText(context, "Error al crear el zip", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -647,6 +700,52 @@ private fun ExportCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RawLogCard(
+    info: RawLogInfo,
+    isZipping: Boolean,
+    onShare: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "Registro bruto",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = info.path,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Tamaño: ${RawLogExporter.formatSize(info.sizeBytes)}",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(
+                onClick = onShare,
+                enabled = !isZipping,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (isZipping) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Icon(Icons.Default.Share, null, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Compartir registro bruto")
+                }
             }
         }
     }

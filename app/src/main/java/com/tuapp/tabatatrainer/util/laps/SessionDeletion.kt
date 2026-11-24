@@ -5,17 +5,21 @@ package com.tuapp.tabatatrainer.util.laps
  * claves foráneas, así que no hay cascada en Room: se hace aquí, en un único sitio, para que el
  * historial y el detalle borren exactamente lo mismo. Hijos primero y la sesión al final: si algo
  * falla a medias, la sesión sigue visible y se puede reintentar.
+ *
+ * Spec 008, R14: la carpeta del registro en bruto (`files/rawlog/<sessionId>/`) es un hijo más.
  */
 object SessionDeletion {
     suspend fun deleteWithChildren(
         deleteLaps: suspend () -> Unit,
         deleteGpsPoints: suspend () -> Unit,
         deleteSensorReadings: suspend () -> Unit,
+        deleteRawLog: suspend () -> Unit,
         deleteSession: suspend () -> Unit
     ) {
         deleteLaps()
         deleteGpsPoints()
         deleteSensorReadings()
+        deleteRawLog()
         deleteSession()
     }
 }
