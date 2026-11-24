@@ -2,7 +2,7 @@
 
 ## Objetivo
 Rediseñar el layout de `HomeScreen` para que no queden huecos vacíos y se adapte a:
-móvil vertical, móvil horizontal, tablet vertical y tablet horizontal (S22+ / Tab S9).
+móvil vertical, móvil horizontal, tablet vertical y tablet horizontal (S22 Ultra / Tab S9).
 
 ## Requisitos
 - RF-1: La decisión de layout se basa en ancho/alto reales disponibles (`BoxWithConstraints`), no solo en `screenWidthDp > 600` (bug: la tablet en vertical usaba el layout horizontal).

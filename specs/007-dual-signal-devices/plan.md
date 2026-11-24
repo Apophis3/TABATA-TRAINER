@@ -380,7 +380,7 @@ Los tres "pendientes vistos" en T-04/T-05. No es T-06 (que sigue sin empezar).
   contrato de `SensorManager`.
 
 ### 13. Arreglos tras el paseo del 2026-11-22 (1.6.140; R2.1 ampliado, R8.2 aclarado, R10; fuera de T-06 y T-07)
-**Evidencia (BD y volcado Bluetooth del S22+; el Logcat del paseo ya no estaba en el búfer).** Sesión de Ruta
+**Evidencia (BD y volcado Bluetooth del S22 Ultra; el Logcat del paseo ya no estaba en el búfer).** Sesión de Ruta
 09:23–10:45. HR2 (pulsómetro de un desconocido, nunca guardado) aparece a las 09:27 y graba **142 fijo de 09:37 a
 10:13**. HR1 (XOSS) graba hasta las 10:22:48 y luego nada; Reconectar no lo recupera. Bluetooth del sistema caído y
 reiniciado a las 09:13 (antes de salir); llamadas por los auriculares 10:10–10:44. La causa de perder la XOSS por
@@ -494,4 +494,4 @@ desplaza a un BLE propio; ignorar quita el aviso. La franja y el guardado en el 
   - Emparejado: nombre; 1+1 seguro; 2+2 nunca persistente; plano solo sesión; empate no agrupa.
   - Huecos: un aparato dual en un solo hueco; caída y vuelta de ANT+; hueco fijo aunque llegue segundo.
   - Cadencia: lo mismo, incluido 0 rpm.
-- Prueba real (usuario, S22+ / Tab S9) con Logcat `💓` y `🚴`.
+- Prueba real (usuario, S22 Ultra / Tab S9) con Logcat `💓` y `🚴`.

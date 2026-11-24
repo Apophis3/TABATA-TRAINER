@@ -1,7 +1,7 @@
 # Checklist de pruebas en exterior — Spec 006 (+ spec 005 sensores)
 
 Cubre T-04…T-08 y T-10 (las que faltan por validar). T-01, T-02, T-03 y T-09 ya están validadas; aquí se vuelven a pisar de pasada.
-Equipo: S22+ (principal). Opcional: Tab S9 para comprobar el apaisado en pantalla grande.
+Equipo: S22 Ultra (principal). Opcional: Tab S9 para comprobar el apaisado en pantalla grande.
 
 **Cómo usarlo:** ve marcando `[x]` según avanzas. Si algo falla, anota en «Resultado» qué viste y no sigas con esa prueba hasta contármelo. Al terminar cada fase, respóndeme con el formato de la sección final y yo cierro las tareas en `tasks.md` y en la bitácora.
 

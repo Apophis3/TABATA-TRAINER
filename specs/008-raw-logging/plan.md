@@ -1,0 +1,161 @@
+# Plan 008 — Registro en bruto
+
+Estado: **aprobado por el usuario el 2026-11-24** («Lo demás de plan.md, aprobado… Sigue con T-01»).
+
+## 1. Lo comprobado en el código (2026-11-24, rama `spec-007-dual-signal-devices`, 1.6.143)
+- `GpsManager` (`sensor/GpsManager.kt`): `LocationRequest` alta precisión, 1000 ms, mínimo 500 ms,
+  `setMinUpdateDistanceMeters(1f)`, callback en el hilo principal; solo `result.lastLocation`; filtro
+  precisión ≤ 15 m y velocidad > 0,7 m/s; parado con buena precisión reenvía la última posición válida con
+  velocidad 0 y `timestamp = location.time` del punto nuevo. `onLocationAvailability` solo va al Logcat.
+- `GpsReading` / `GpsPointEntity`: hora, lat, lon, altitud, velocidad, precisión (+ fase y ronda en Room). Sin
+  rumbo, `elapsedRealtimeNanos`, proveedor, precisión vertical/velocidad/rumbo ni satélites.
+- `FreeRideService` y `WorkoutService`: guardan si `isRunning && !isPaused`, búfer de 10; `stopRide` vacía,
+  `onDestroy` no. `START_NOT_STICKY`. Ninguno sobrescribe `onTaskRemoved` ni `onTrimMemory`.
+- No hay `WakeLock` (el permiso está declarado y sin uso), ni `PowerManager`, ni barómetro, ni batería del
+  móvil, ni receptores de pantalla. Única medida "para que no lo maten": canal de notificación
+  `IMPORTANCE_HIGH` en `FreeRideService`. `MainActivity` con `keepScreenOn="true"` (manifiesto).
+- No hay otra petición de posiciones en la app (los mapas tienen `isMyLocationEnabled = false`).
+- Manifiesto: ubicación precisa y aproximada, servicio en primer plano tipo `location|connectedDevice`;
+  **sin** `ACCESS_BACKGROUND_LOCATION`.
+- `FileProvider` con `cache-path`, `files-path` y `external-files-path` (vale para el zip en caché).
+- Versiones: `compileSdk 37`, `targetSdk 36`, `minSdk 26`; `play-services-location 21.4.0`; Kotlin 2.4.20.
+- `lifecycle-process` **no** está entre las dependencias → no se usa `ProcessLifecycleOwner`.
+
+## 2. Paquete nuevo `com.tuapp.tabatatrainer.rawlog`
+| Clase | Qué hace | Android |
+|---|---|---|
+| `RawRows` | Datos simples (`FusedFix`, `BaroSample`, `BatterySample`, `RawEvent`, `GnssSat`) y funciones que los convierten en una fila CSV. Cabeceras como constantes. | No (Kotlin puro, testeable) |
+| `RawCsvFormat` | Números con `Locale.ROOT`, vacío si falta, comillas CSV para textos. | No |
+| `RawFileWriter` | Un archivo: crea con cabecera, añade filas a un búfer en memoria, vacía cada 5 s, al instante si se pide, y al cerrar. Si falla una escritura, marca el archivo como roto y lo dice una vez (callback). Nunca lanza excepciones. Reloj inyectado para los tests. | Solo `java.io` (testeable con carpeta temporal) |
+| `RawLogSettings` | Interruptor en `SharedPreferences` (`raw_log`, clave `enabled`, por defecto `false`). | Sí |
+| `RawSessionLogger` | `@Singleton` (Hilt). `start(sessionId, activityType)`, `event(type, detail, flushNow)`, `stop(reason)`. Abre la carpeta, crea un `HandlerThread` propio («RawLog»), arranca las fuentes y escribe `meta.json`. Si el interruptor está apagado al llamar a `start`, no hace nada y el resto de llamadas tampoco. | Sí |
+| `RawFusedSource` | Petición Fused propia (§4). | Sí |
+| `RawBaroSource` | Barómetro con `android.hardware.SensorManager` (no el `SensorManager` de la app). | Sí |
+| `RawBatterySource` | Lectura de batería cada 60 s y a demanda. | Sí |
+| `RawSystemSource` | Receptores de pantalla, Doze, Doze ligero, ahorro; estado inicial de energía y permisos. | Sí |
+| `AppVisibilityTracker` | Cuenta actividades visibles con `registerActivityLifecycleCallbacks` en `TabataApp`; avisa al registrador de primer/segundo plano. Sin dependencias nuevas. | Sí |
+| `RawLogExporter` | Tamaño de la carpeta, zip con `java.util.zip` en `cacheDir/rawlog_<id>.zip`, borrar carpeta. Comprimir **no** toca la carpeta `rawlog/<sessionId>/`: solo se borra al borrar la sesión (R14). Lo único temporal es el `.zip` de la caché; en T-05 se borran los `rawlog_*.zip` viejos antes de crear uno nuevo (no justo después de compartir, porque la app que lo recibe lo lee más tarde). | `java.io` (testeable) |
+
+Por qué un `HandlerThread` propio: todas las fuentes y la escritura van en un solo hilo → sin bloqueos, sin
+tocar el hilo principal (la UI y el GPS de la app no esperan al disco) y sin carreras entre archivos.
+
+## 3. Ciclo de una sesión con el interruptor encendido
+1. `service_created`: el servicio llama a `logger.serviceCreated(...)` en `onCreate`. Como aún no hay sesión,
+   el registrador guarda la hora (epoch y elapsed) en memoria y la escribe como primera fila al empezar.
+2. `start`: `FreeRideService.startRide()` / `WorkoutService.startWorkout()` (este solo con GPS activado) llaman
+   a `logger.start(sessionId, "FREE_RIDE" | "TABATA")` **después** de crear su `sessionId` y sin cambiar nada
+   más. El registrador lee el interruptor; si está apagado, termina aquí.
+3. Pausa/reanudación/parada: una línea en `pauseRide/resumeRide/stopRide` (y equivalentes de Tabata) →
+   `session_pause`, `session_resume`, `session_stop` + `logger.stop()`.
+4. `onDestroy` de los servicios: `service_destroyed` y `logger.stop()` si sigue abierto (cierre sin Detener).
+5. `stop`: quita la petición de posiciones, el barómetro, los receptores y la tarea de 60 s; vacía y cierra
+   archivos; completa `meta.json`; termina el `HandlerThread`. Llamarlo dos veces no hace nada.
+
+Si el proceso muere de golpe se pierden como mucho los últimos 5 s (lo aceptado en el pedido).
+
+## 4. `gps_fused.csv`
+- `LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000)`, `setMinUpdateIntervalMillis(500)` (el
+  mismo que la app, para no pedir más rápido que hoy), **sin** `setMinUpdateDistanceMeters` (0),
+  `setWaitForAccurateLocation(false)`, sin retraso de lotes (`maxUpdateDelay` 0). Callback en el hilo «RawLog».
+- `onLocationResult`: recorre `result.locations` y escribe una fila por posición (`batch_index`, `batch_size`).
+- Campo a campo con su `hasX()`: altitud, precisión vertical, horizontal, velocidad, precisión de velocidad,
+  rumbo, precisión de rumbo; si `hasX()` es falso → vacío. `is_mock`: `isMock` (Android 12+) o
+  `isFromMockProvider`. `loc_time_ms = time`, `loc_elapsed_ns = elapsedRealtimeNanos`, `provider`.
+- `onLocationAvailability` → evento `location_available` con vaciado inmediato.
+- La conversión `Location → FusedFix` es la única parte con Android; el formato de la fila se prueba sin él.
+
+## 5. `baro.csv`
+- `getDefaultSensor(Sensor.TYPE_PRESSURE)`; `registerListener(listener, sensor, 200_000 µs, 0 µs, handler)`:
+  ritmo pedido **200 ms** (Android lo toma como orientación) y **sin lotes**, para ver si con la pantalla
+  apagada se cortan las muestras en vez de esconderlo en lotes.
+- Una fila si `event.timestamp − último_escrito ≥ 950 ms`. Se cuentan recibidas, escritas y descartadas (a
+  `meta.json`).
+- Por qué 200 ms y no 1 s (decisión del usuario tras T-01): con el sensor a 1 Hz, una muestra que llega 40 ms
+  tarde seguida de otra 40 ms pronto deja 920 ms entre ellas y el filtro de 950 ms perdería una. Pidiéndolas más
+  rápido siempre hay una muestra disponible pasados los 950 ms, y el archivo queda en una por segundo.
+
+## 6. `battery.csv`, `events.csv` y `meta.json`
+- Batería: `level_pct` = `BatteryManager.getIntProperty(BATTERY_PROPERTY_CAPACITY)` (Android ya lo da en %,
+  así no se divide nada). Del `ACTION_BATTERY_CHANGED` pegajoso: temperatura en décimas de °C, `status` y
+  `plugged` como números de Android. `getIntProperty(CHARGE_COUNTER)` y `getLongProperty(CURRENT_NOW)`;
+  `Integer.MIN_VALUE`/`Long.MIN_VALUE` → vacío. Tarea de 60 s con `postDelayed` en el hilo «RawLog» (se
+  retrasa si el móvil duerme: es lo que se quiere ver).
+- Pantalla: `ACTION_SCREEN_ON/OFF` registrados en el contexto de la aplicación; detalle con
+  `PowerManager.isInteractive`. Cada cambio de pantalla también escribe una fila de batería.
+- Energía: `ACTION_DEVICE_IDLE_MODE_CHANGED`, `ACTION_DEVICE_LIGHT_IDLE_MODE_CHANGED` (Android 13+),
+  `ACTION_POWER_SAVE_MODE_CHANGED` → el valor nuevo. `isIgnoringBatteryOptimizations` al empezar y en cada
+  encendido de pantalla (solo si cambió).
+- Permisos al empezar: `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`, `ACCESS_BACKGROUND_LOCATION`
+  (granted sí/no).
+- `onTrimMemory(level)` y `onTaskRemoved` de los servicios → eventos (vaciado inmediato).
+- Fallo de almacenamiento (decisión del usuario tras T-01): **nunca** una ventana, un aviso ni un Toast. El
+  `onError` de cada `RawFileWriter` escribe una fila `write_error` en `events.csv` (detalle: archivo y motivo,
+  vaciado inmediato) y una línea en Logcat (etiqueta `RawLog`). Si el que falla es el propio `events.csv`, solo
+  la línea de Logcat. La sesión de la app sigue igual.
+- `meta.json`: escrito a mano con `org.json.JSONObject` (incluido en Android, no es dependencia nueva).
+  Versión de la app con `packageManager.getPackageInfo` (no depende de `BuildConfig`). Nota fija:
+  «current_now_ua: valor crudo de BatteryManager; en Samsung la unidad y el signo pueden variar».
+
+## 7. Impacto en servicios y navegación (Clave 3, Graph Lineage)
+- `NavGraph.kt`: **no se toca.** La pantalla de detalle de sesión ya existe; solo gana un bloque.
+- `FreeRideService` / `WorkoutService` — cambios exactos:
+  - `onCreate`: + `rawLogger.serviceCreated(name)` (solo guarda una hora en memoria).
+  - `startRide/startWorkout`, `pause*/resume*/stop*`: + una llamada al registrador al final, sin cambiar el orden
+    ni el estado.
+  - `onDestroy`: + `rawLogger.serviceDestroyed(name)` antes de `super.onDestroy()`.
+  - **Nuevos** `onTaskRemoved(rootIntent)` y `onTrimMemory(level)`: llaman a `super` y anotan el evento.
+    No paran, no reinician ni cambian `START_NOT_STICKY`. Hoy esos métodos son los de `Service` por defecto
+    (no hacen nada), así que el comportamiento no cambia. **Necesita tu aprobación expresa.**
+- Fugas: el registrador usa solo el contexto de la aplicación (nunca el del servicio ni de la actividad);
+  receptores, sensor y petición de posiciones se quitan en `stop`; el hilo termina con `quitSafely`.
+  Si el servicio muere sin Detener, `onDestroy` llama a `stop`.
+- `TabataApp`: + registro de `AppVisibilityTracker` (solo cuenta `onStart/onStop` de actividades).
+- `SensorManager` de la app: **sin cambios.** `GpsManager`: **sin cambios.**
+
+## 8. Riesgos
+- **R-1 — La petición extra podría cambiar lo que recibe la app.** Fused junta las peticiones de la app. En tus
+  rutas de septiembre, la mitad de los intervalos entre filas de `gps_points` ya son de menos de 0,9 s (el
+  mínimo de 500 ms deja que lleguen más de una por segundo), sin otra petición en la app. Con el mismo
+  intervalo y mínimo no debería cambiar, pero no se puede asegurar: se comprueba con A5 (filas por minuto con
+  el interruptor encendido y apagado).
+- **R-2 — Sin WakeLock a propósito.** Con la pantalla apagada pueden faltar filas de barómetro y batería y
+  llegar tarde las posiciones. Eso es lo que se quiere medir; un WakeLock lo taparía. Se dice en `meta.json`
+  (`wakelock: false`).
+- **R-3 — Batería y espacio.** El barómetro gasta poco y el GPS ya está encendido. Tamaño estimado por hora:
+  `gps_fused` ≈ 0,6 MB, `baro` ≈ 0,25 MB, resto < 0,1 MB; `gnss_sats` (fase 2) ≈ 5–8 MB.
+- **R-4 — Corriente en Samsung.** Unidades/signo dudosos: se guarda crudo (R11).
+
+## 9. Tests (JVM, sin Android)
+- `RawCsvFormatTest`: punto decimal aunque `Locale.getDefault()` sea español; vacío para nulos; comillas y
+  saltos de línea en `detail`; separador `;`.
+- `RawRowsTest`: cada cabecera tiene tantas columnas como su fila; filas de ejemplo exactas (fused con todos
+  los campos y con campos ausentes; baro; batería; evento).
+- `RawFileWriterTest`: cabecera una sola vez; nada escrito antes de 5 s; vaciado a los 5 s con reloj falso;
+  vaciado inmediato; cierre vacía; sesión sin eventos deja `events.csv` solo con cabecera; carpeta sin
+  permiso de escritura → no lanza y avisa una vez.
+- `BaroDecimatorTest`: con muestras cada 200 ms escribe una por segundo; con 1 Hz con retrasos de ±40 ms no
+  pierde ninguna; cuenta descartadas.
+- `RawLogExporterTest`: el zip contiene los archivos con el mismo contenido; tamaño de carpeta.
+- Suite esperada: **243 + los nuevos** (se dirá el número exacto en cada tarea).
+
+## 10. Decisiones del usuario (2026-11-24)
+1. `plan.md` aprobado: sin WakeLock a propósito, una fila por satélite, barómetro con mínimo de 950 ms y
+   descartadas contadas, vacío y nunca 0, comprobación A5.
+2. `onTaskRemoved` y `onTrimMemory`: sí, solo para anotar el evento.
+3. R14: sí, al borrar una sesión se borra su carpeta `rawlog`.
+4. Rama `spec-008-raw-logging` desde la punta de `spec-007-dual-signal-devices`.
+5. Móvil: S22 Ultra (SM-S908B). Corregido «S22+» en las notas del proyecto.
+6. A2 se hace dos veces (sin y con exclusión del ahorro de batería, cambiada a mano). Sin botón para pedirla.
+7. Los defectos anotados (GPX, búfer de 9 puntos, `WAKE_LOCK` sin uso) quedan para una spec posterior.
+
+## 11. Propuesta para la spec 009 (NO se hace en esta)
+Con los datos de esta spec, probablemente convenga en `GpsManager`:
+- Quitar la distancia mínima de 1 m (o dejarla en 0) y decidir "parado" con los datos, no con la petición.
+- Recorrer `result.locations` en vez de solo `lastLocation`.
+- No inventar puntos: hoy, parado, se guarda la posición vieja con la hora nueva. Mejor guardar el punto real
+  y marcarlo como "parado" o no guardarlo.
+- Revisar los umbrales 15 m y 0,7 m/s con la distribución real de precisión y velocidad.
+- Guardar en Room rumbo, `elapsedRealtimeNanos` y precisión vertical (requiere migración).
+- Vaciar el búfer de puntos en `onDestroy`.
+- Decidir WakeLock / exclusión de ahorro solo si los datos de pantalla apagada muestran cortes.
+- Arreglar GPX: omitir `<ele>` sin altitud y llevar la velocidad a `<extensions>`.

@@ -6,6 +6,40 @@ memoria privada de Claude. **Lo más reciente arriba.**
 
 ---
 
+## 2026-11-24 — Spec 008 · T-01 formato y escritor (hecha, 284/284)
+- Usuario aprobó `plan.md` (§10: `onTaskRemoved`/`onTrimMemory` solo anotan; borrar la carpeta con la sesión;
+  prueba de pantalla apagada dos veces, sin excluir y excluyendo a mano del ahorro, sin botón para pedirlo).
+  Rama `spec-008-raw-logging` desde la punta de la 007. Móvil: S22 Ultra (SM-S908B), corregido en notas y specs.
+- T-01, paquete nuevo `rawlog/` sin conectar a nada: `RawCsvFormat` (`;`, punto decimal, sin notación
+  científica, vacío y no 0 si falta), `RawRows` (filas y cabeceras), `RawFileWriter` (búfer, vaciado a 5 s / al
+  momento / al cerrar, nunca lanza, avisa una vez), `BaroDecimator` (mínimo 950 ms por hora del sensor),
+  `RawLogExporter` (tamaño, zip, borrado; rechaza ids no seguros).
+- Tests +40 (5 clases) → suite esperada **283**. Sin compilar (lo hace el usuario). Sin tocar Room, Gradle,
+  `NavGraph.kt`, servicios ni `SensorManager`. Sin commit.
+- Usuario compiló y pasó la suite: **283/283** en verde (leído en los informes XML de los tests).
+- Decisiones tras T-01 (anotadas en `plan.md`): barómetro pedido a **200 ms** (con 1 Hz y retrasos de ±40 ms el
+  filtro de 950 ms perdería muestras); fallo de almacenamiento solo como fila `write_error` en `events.csv` y línea
+  en Logcat, nunca ventana; exportar no borra la carpeta (solo el `.zip` viejo de la caché, en T-05).
+- +1 test (`zipping_keeps_the_session_folder_untouched`) → **284/284** en verde (usuario y XML). T-01 marcada y
+  commit en `spec-008-raw-logging` (1.6.147).
+
+---
+
+## 2026-11-24 — Spec 008 · Registro en bruto: spec, plan y tareas (pendiente de aprobar `plan.md`)
+- Pedido del usuario: guardar en archivos aparte (sin Room) GPS, barómetro, estado de la app y batería, sin filtrar,
+  para estudiar el S22 en rutas reales (ideas para TrackCan). Creados `specs/008-raw-logging/` (`spec.md`,
+  `plan.md`, `tasks.md`). Sin código.
+- Comprobado en el código: no hay WakeLock (permiso declarado sin uso) ni gestión de Doze/ahorro; filtros de
+  `GpsManager` como describió el usuario; `onDestroy` de los servicios no vacía el búfer de puntos; GPX con
+  `<ele>0.0</ele>` inventado y `<speed>` fuera de norma (anotados, no se tocan). Ninguna prueba previa con la
+  pantalla apagada (X-01 de la 006 sin marcar).
+- Copia de BD del 2026-09-25: rutas más largas 4 238–5 385 filas; mediana entre filas 0,72–0,93 s, máximo
+  10–348 s (los huecos largos no se distinguen de pausas con esa tabla).
+- Pendiente del usuario: aprobar `plan.md`, los métodos `onTaskRemoved`/`onTrimMemory` que solo anotan, borrado
+  de la carpeta con la sesión, rama y modelo del móvil. Sin commit, en la rama de la 007.
+
+---
+
 ## 2026-11-22 — Spec 007 · Arreglos tras el paseo (pendiente de prueba)
 - El usuario probó Ruta en un paseo (1.6.140) y pidió reparar dos fallos. Anotados antes del código (`spec.md`
   R2.1, R8.2, R10; `plan.md` §13; entrada propia en `tasks.md`). Fuera de T-06 y T-07.
@@ -437,7 +471,7 @@ mismo y la unidad `/km` en vertical letra a letra (el valor a 55 sp no cabía en
   de la franja a 12 sp y más contraste. Landscape sin cambio de layout (ya tenía scroll).
 
 ### Estado
-- Validado por el usuario en el S22+ (portrait): celda Ritmo y franja de pasos se leen enteras.
+- Validado por el usuario en el S22 Ultra (portrait): celda Ritmo y franja de pasos se leen enteras.
 
 ---
 
@@ -684,7 +718,7 @@ calcadas). Trabajo sobre `sensor/HeartRateHub.kt` (Fase C, gestor único de HR).
   Arreglado: la tablet en vertical usaba el layout horizontal (`screenWidthDp > 600`).
 - Vertical: las tarjetas reparten el alto (sin huecos); scroll si alto < 620dp.
   Horizontal: panel lateral + tarjetas lado a lado a todo el alto.
-- Pendiente (T-02): compilar e instalar (usuario) y validar en S22+ y Tab S9.
+- Pendiente (T-02): compilar e instalar (usuario) y validar en S22 Ultra y Tab S9.
 - Revisión 2: actividades en la misma fila; fila 2 = Última actividad (datos reales) +
   Esta semana (desde lunes: sesiones, tiempo, km, FC media); fila 3 = Historial | Perfil | Cerrar.
   Nuevo `HomeViewModel` (solo lectura de `SessionDao.getAllSessions()`) + `HomeSummaryTest`.

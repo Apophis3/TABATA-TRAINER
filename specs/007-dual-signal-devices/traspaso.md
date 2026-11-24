@@ -177,7 +177,7 @@ Documento para continuar en un hilo nuevo (texto de arranque: el que da el agent
   `C:\Users\APO\AppData\Local\Android\Sdk\platform-tools\adb.exe` (solo lectura: `devices`, `logcat`).
   Hay dos entradas en `adb devices` (una "offline"): usar la que diga `device`, `-s adb-R3CTA0JHTEZ-ORXOOh._adb-tls-connect._tcp`
   (el 2026-11-21 por la tarde `-s R3CTA0JHTEZ` daba "not found").
-- **La evidencia la lee el agente, no se pide en capturas:** S22+ por adb inalámbrico; tras compilar el
+- **La evidencia la lee el agente, no se pide en capturas:** S22 Ultra por adb inalámbrico; tras compilar el
   usuario, los tests quedan en `app/build/test-results/testDebugUnitTest/*.xml`.
 - Lecturas guardadas por segundo (HR1/HR2/cadencia): copiar la BD con
   `adb exec-out run-as com.tuapp.tabatatrainer cat databases/tabata_trainer_db` (y `-wal`, `-shm`) a la carpeta
