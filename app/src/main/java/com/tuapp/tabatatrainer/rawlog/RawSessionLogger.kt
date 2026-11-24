@@ -42,6 +42,8 @@ class RawSessionLogger @Inject constructor(
     ) {
         var receiver: BroadcastReceiver? = null
         var lastIgnoringOptimizations: Boolean? = null
+        var fused: RawFusedSource? = null
+        var fusedRecorder: RawFusedRecorder? = null
     }
 
     private val lock = Any()
@@ -164,6 +166,7 @@ class RawSessionLogger @Inject constructor(
         Log.i(TAG, "Inicio: sesión=${s.core.sessionId} servicio=${s.core.service} carpeta=${s.core.dir.absolutePath}")
         writeInitialState(s, stamp)
         registerReceivers(s)
+        startSources(s)
         writeMeta(s)
         s.handler.postDelayed(object : Runnable {
             override fun run() {
@@ -175,6 +178,8 @@ class RawSessionLogger @Inject constructor(
 
     /** Cierra en el hilo de la sesión: [close] anota la parada; luego receptores fuera, `meta.json` y fin del hilo. */
     private fun finish(s: Active, close: () -> Boolean) {
+        // La petición de posiciones se quita siempre, también si la sesión ya estaba cerrada (R-1: que no siga viva).
+        safely("stopSources") { stopSources(s) }
         safely("finish") {
             if (close()) {
                 unregisterReceivers(s)
@@ -183,12 +188,31 @@ class RawSessionLogger @Inject constructor(
                     TAG,
                     "Fin: sesión=${s.core.sessionId} motivo=${s.core.stopReason} filas=" +
                         s.core.fileStats().entries.joinToString { "${it.key}:${it.value.rows}" } +
-                        " errores=${s.core.writeErrors}"
+                        " errores=${s.core.writeErrors}" +
+                        (s.fusedRecorder?.let { " fused=${it.resultsReceived}r/${it.locationsReceived}p" } ?: "")
                 )
             }
         }
         s.handler.removeCallbacksAndMessages(null)
         s.thread.quitSafely()
+    }
+
+    // ---------------------------------------------------------------- fuentes (T-03: Fused)
+
+    /** En el hilo «RawLog», solo con la sesión ya abierta (interruptor encendido). */
+    private fun startSources(s: Active) {
+        val recorder = RawFusedRecorder(s.core)
+        val source = RawFusedSource(context, s.handler, recorder, ::now)
+        s.fusedRecorder = recorder
+        s.fused = source
+        safely("fused.start") { source.start() }
+    }
+
+    private fun stopSources(s: Active) {
+        val source = s.fused ?: return
+        s.fused = null
+        source.stop()
+        Log.i(TAG, "Fused: petición quitada (sesión ${s.core.sessionId})")
     }
 
     // ---------------------------------------------------------------- estado del móvil
@@ -328,6 +352,26 @@ class RawSessionLogger @Inject constructor(
                     put("min_distance_m", APP_GPS_MIN_DISTANCE_M)
                     put("note", "Copiados a mano de GpsManager (constantes privadas, no se toca)")
                 })
+                put("raw_gps_params", JSONObject().apply {
+                    put("source", "fused")
+                    put("priority", RawFusedSource.PRIORITY_NAME)
+                    put("interval_ms", RawFusedSource.INTERVAL_MS)
+                    put("min_interval_ms", RawFusedSource.MIN_INTERVAL_MS)
+                    put("min_distance_m", RawFusedSource.MIN_DISTANCE_M.toDouble())
+                    put("max_update_delay_ms", RawFusedSource.MAX_UPDATE_DELAY_MS)
+                    put("wait_for_accurate_location", RawFusedSource.WAIT_FOR_ACCURATE)
+                })
+                // Aceptado por el usuario el 2026-11-24 (spec R8, plan §8 R-1).
+                put("observer_effect", RawFusedSource.OBSERVER_EFFECT)
+                put("observer_effect_note", RawFusedSource.OBSERVER_EFFECT_NOTE)
+                s.fusedRecorder?.let { r ->
+                    put("fused", JSONObject().apply {
+                        put("started", r.started)
+                        put("results_received", r.resultsReceived)
+                        put("locations_received", r.locationsReceived)
+                        put("error", r.lastError ?: JSONObject.NULL)
+                    })
+                }
                 put("files", JSONObject().apply {
                     core.fileStats().forEach { (name, stat) ->
                         put(name, JSONObject().apply {

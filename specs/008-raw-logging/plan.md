@@ -89,6 +89,25 @@ Si el proceso muere de golpe se pierden como mucho los últimos 5 s (lo aceptado
 - `onLocationAvailability` → evento `location_available` con vaciado inmediato.
 - La conversión `Location → LocationFix` es la única parte con Android; el formato de la fila se prueba sin él.
 
+### 4.1 Detalles fijados al hacer T-03
+- **Dos clases.** `RawFusedRecorder` (Kotlin puro, probado en la JVM): abre `gps_fused.csv`, una fila por posición,
+  eventos y contadores. `RawFusedSource` (Android): la petición, la conversión y quitarla. La crea
+  `RawSessionLogger` solo al abrir la sesión (interruptor encendido); con el interruptor apagado no se crea el
+  cliente de Fused (R2).
+- **Distancia mínima** puesta a 0 de forma explícita (`setMinUpdateDistanceMeters(0f)`) y `setMaxUpdateDelayMillis(0)`.
+- **Orden al empezar:** permiso (fino o aproximado) → petición → `source_started` con los parámetros
+  (`file=gps_fused.csv;priority=…;interval_ms=1000;min_interval_ms=500;min_distance_m=0;max_update_delay_ms=0;wait_for_accurate=false`).
+  Sin permiso: `source_error` `reason=no_location_permission` y **sin** archivo. Si Fused rechaza la petición más
+  tarde: `source_error` `reason=request_failed: …` (llega al hilo «RawLog»).
+- **Hora de llegada:** una por resultado; todas las posiciones del lote llevan la misma (R5). Un resultado vacío
+  cuenta pero no escribe filas. Las filas van al búfer de 5 s; solo los eventos se vacían al instante.
+- **`location_available`:** detalle `true`/`false` a secas, tal como dice R10 (no `available=…`).
+- **Parada:** la petición se quita en todas las salidas (`user`, `completed`, `service_destroyed`, `replaced`), antes
+  de anotar `session_stop`, y lo dice una línea de Logcat «Fused: petición quitada». En pausa **no** se quita (R3).
+- **`meta.json`:** + `raw_gps_params` (fuente, prioridad, 1000/500/0 m, sin lotes, sin espera) junto a
+  `app_gps_params`, y `fused` (`started`, `results_received`, `locations_received`, `error`).
+  Tras la prueba: + `observer_effect` y `observer_effect_note` (§8 R-1).
+
 ## 5. `baro.csv`
 - `getDefaultSensor(Sensor.TYPE_PRESSURE)`; `registerListener(listener, sensor, 200_000 µs, 0 µs, handler)`:
   ritmo pedido **200 ms** (Android lo toma como orientación) y **sin lotes**, para ver si con la pantalla
@@ -143,6 +162,11 @@ Si el proceso muere de golpe se pierden como mucho los últimos 5 s (lo aceptado
   mínimo de 500 ms deja que lleguen más de una por segundo), sin otra petición en la app. Con el mismo
   intervalo y mínimo no debería cambiar, pero no se puede asegurar: se comprueba con A5 (filas por minuto con
   el interruptor encendido y apagado).
+  **Medido (2026-11-24, S22 Ultra, mismo guion de 6 min encendido y apagado):** en marcha, Room recibió
+  82,5 puntos/min con el interruptor encendido frente a 72 apagado (76 % frente a 49 % de intervalos < 0,9 s).
+  Andando (~1,3 m/s): ~1,2 puntos/s frente a ~1,05 (**+14 %**). A ~3 m/s: ~1,55/s en los dos (**igual**).
+  **Decisión del usuario:** se acepta (interruptor solo para pruebas, apagado por defecto) y se mantiene la
+  petición activa (ver R8). `meta.json` lo dice con `observer_effect` = `peticion_activa_1000ms_sin_distancia_minima`.
 - **R-2 — Sin WakeLock a propósito.** Con la pantalla apagada pueden faltar filas de barómetro y batería y
   llegar tarde las posiciones. Eso es lo que se quiere medir; un WakeLock lo taparía. Se dice en `meta.json`
   (`wakelock: false`).

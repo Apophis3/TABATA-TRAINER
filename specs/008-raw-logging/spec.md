@@ -49,6 +49,13 @@ no cambia.
   cada resultado. Columnas:
   `epoch_ms;elapsed_ns;loc_time_ms;loc_elapsed_ns;provider;lat;lon;alt_m;vert_acc_m;h_acc_m;speed_ms;speed_acc_ms;bearing_deg;bearing_acc_deg;is_mock;batch_index;batch_size`
   (`batch_index` empieza en 0; `batch_size` = posiciones de ese resultado).
+  **Efecto observador (aceptado por el usuario el 2026-11-24):** Fused junta esta petición con la de la app, así
+  que con el interruptor encendido la app puede recibir más puntos. Medido en el S22 Ultra con el mismo guion:
+  **+14 % andando** (~1,05 → ~1,2 puntos/s en Room) e **igual a ~3 m/s** (~1,55/s en los dos). Se acepta porque
+  el interruptor es solo para pruebas y va apagado por defecto. La petición sigue siendo **activa** (no pasiva):
+  el registro mide lo que el móvil da a una petición propia de 1 s sin distancia mínima, que es como grabará
+  TrackCan; en pasivo, con la pantalla apagada no se sabría si un corte es del móvil o de la petición de Tabata.
+  Queda en `meta.json` (`observer_effect`).
 - **R9 — `baro.csv`.** Sensor de presión del móvil, ≈ 1 fila por segundo. Si el sensor da más, se escribe una
   muestra cuando han pasado al menos 950 ms (hora del sensor) desde la última escrita; las demás se descartan
   sin promediar y su número va a `meta.json`. Columnas:
@@ -124,5 +131,5 @@ no cambia.
 - A4 — Con el interruptor apagado la app se comporta igual que antes: suite de tests en verde y ninguna
   carpeta `rawlog/` nueva.
 - A5 — Con el interruptor encendido, `gps_points` de Room tiene un número de filas por minuto parecido al de
-  una sesión anterior equivalente (la petición extra no cambia lo que recibe la app; ver plan §8 riesgo R-1).
+  una sesión anterior equivalente (medido el 2026-11-24: +14 % andando e igual a ~3 m/s; aceptado, ver R8 y plan §8 riesgo R-1).
 - A6 — El `.zip` compartido se abre en el PC y los CSV se leen con `;` y punto decimal.

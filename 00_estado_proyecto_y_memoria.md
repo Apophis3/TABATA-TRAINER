@@ -6,6 +6,30 @@ memoria privada de Claude. **Lo más reciente arriba.**
 
 ---
 
+## 2026-11-24 — Spec 008 · T-03 `gps_fused.csv` (hecha, 310/310)
+- `RawFusedRecorder` (Kotlin puro): abre `gps_fused.csv`, una fila por posición de cada resultado con la misma hora
+  de llegada y `batch_index`/`batch_size`, `source_started`/`source_error`/`location_available` (detalle `true`/`false`)
+  y contadores. `RawFusedSource` (Android): petición propia alta precisión 1000/500 ms, distancia 0, sin lotes ni
+  espera, callback en el hilo «RawLog»; cada campo con su `hasX()`; `isMock`/`isFromMockProvider`.
+- `RawSessionLogger`: arranca la fuente al abrir la sesión (solo con el interruptor encendido) y la quita en todas
+  las paradas antes de `session_stop`; `meta.json` gana `raw_gps_params` y `fused`. Línea «Fused: petición quitada».
+- `plan.md` §4.1 con los detalles. Tests +9 (`RawFusedRecorderTest`) → suite esperada **310**. Sin compilar ni
+  commit. Sin tocar `GpsManager`, Room, `NavGraph.kt`, servicios, `SensorManager` ni Gradle.
+- Prueba 1 (1.6.153, S22 Ultra, sesión f04787cd, 6,1 min): suite 310/310; 532 posiciones, 0 errores,
+  ningún hueco > 1,5 s, lote siempre 1; parado y en pausa sigue escribiendo (Room 0 en esos tramos); rumbo vacío
+  en 67 filas (parado), nunca 0; petición quitada al detener. **A5 dudoso:** en marcha Room recibió 82,5 puntos/min
+  y 76 % de intervalos < 0,9 s, frente a ~68/min y ~37 % en las rutas del 22 y 23-11 sin esta petición (R-1).
+  Falta la misma prueba con el interruptor apagado para confirmarlo.
+  Prueba 2, mismo guion con el interruptor apagado (sesión bf552a55): sin carpeta nueva (R2 bien). Room en marcha
+  72/min y 49 % < 0,9 s, frente a 82,5/min y 76 % con el interruptor encendido. Andando (~1,3 m/s): ~1,05 puntos/s
+  apagado frente a ~1,2 encendido (+14 %). A ~3 m/s: igual (~1,55/s en los dos). **R-1 confirmado a paso de
+  andar:** la petición propia hace que la app reciba más puntos.
+- Decisión del usuario: se queda la petición **activa** (mide lo que el móvil da a una petición propia de 1 s sin
+  distancia mínima, como TrackCan; en pasivo no se distinguiría un corte del móvil de uno de la petición de
+  Tabata). Efecto aceptado: R8, plan §8 R-1 y `meta.json` (`observer_effect`). T-03 marcada `[x]`, commit.
+
+---
+
 ## 2026-11-24 — Spec 008 · T-02 interruptor, registrador y eventos (hecha, 301/301)
 - `plan.md` §3.1 fija los detalles: cada llamada lleva el nombre del servicio (los dos pueden estar vivos porque
   Config enlaza `WorkoutService`); pausa/reanudación/parada solo del servicio de la sesión; motivos `user`,

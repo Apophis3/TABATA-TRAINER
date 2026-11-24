@@ -19,8 +19,21 @@ Gradle ni `adb install` (Clave 5). **Ninguna tarea empieza hasta que el usuario 
   encender pantalla, detener) y el listado de la carpeta; otra con el interruptor apagado sin carpeta nueva.
   Hecha (2026-11-24): 301/301; Ruta en S22 Ultra con el interruptor apagado sin carpeta y encendido con
   `events.csv` (16 filas) y `meta.json` completos, 0 errores. Interruptor en Ruta Libre y Config comprobado (1.6.151).
-- [ ] T-03 **`gps_fused.csv`.** `RawFusedSource` (petición propia, todas las posiciones, `location_available`).
+- [x] T-03 **`gps_fused.csv`.** `RawFusedSource` (petición propia, todas las posiciones, `location_available`).
   Evidencia: Ruta de 5–10 min andando; filas por minuto de `gps_fused.csv` y de `gps_points` (A5).
+  Código hecho (2026-11-24, sin compilar): `RawFusedRecorder` + `RawFusedSource`, conectados en `RawSessionLogger`;
+  `RawFusedRecorderTest` +9 → suite esperada **310**.
+  Prueba 1 (1.6.153, S22 Ultra, sesión f04787cd, 6,1 min): suite 310/310; 532 posiciones, 0 errores,
+  ningún hueco > 1,5 s, lote siempre 1; parado y en pausa sigue escribiendo (Room 0 en esos tramos); rumbo vacío
+  en 67 filas (parado), nunca 0; petición quitada al detener. **A5 dudoso:** en marcha Room recibió 82,5 puntos/min
+  y 76 % de intervalos < 0,9 s, frente a ~68/min y ~37 % en las rutas del 22 y 23-11 sin esta petición (R-1).
+  Falta la misma prueba con el interruptor apagado para confirmarlo.
+  Prueba 2, mismo guion con el interruptor apagado (sesión bf552a55): sin carpeta nueva (R2 bien). Room en marcha
+  72/min y 49 % < 0,9 s, frente a 82,5/min y 76 % con el interruptor encendido. Andando (~1,3 m/s): ~1,05 puntos/s
+  apagado frente a ~1,2 encendido (+14 %). A ~3 m/s: igual (~1,55/s en los dos). **R-1 confirmado a paso de
+  andar:** la petición propia hace que la app reciba más puntos.
+  Hecha (2026-11-24): el usuario acepta el efecto (petición activa; R8 y plan §8 actualizados; `observer_effect`
+  en `meta.json`, añadido después de la prueba).
 - [ ] T-04 **`baro.csv` y `battery.csv`.** `RawBaroSource`, `RawBatterySource` (60 s + pantalla + inicio/fin).
   Evidencia: Ruta de 5 min con un apagado de pantalla de 2 min; cabeceras y primeras filas de ambos.
 - [ ] T-05 **Exportar.** Bloque en el detalle de sesión: ruta, tamaño y «Compartir registro bruto» (zip por el
