@@ -99,6 +99,24 @@ quedan fallos:
   - Un aparato sin aprobar no cuenta para la regla "ANT+ desplaza a BLE".
   - Riesgo conocido: el relevo sin solapamiento (R2) sigue dejando que una señal desconocida del otro protocolo, con
     valor parecido, herede el hueco de un aparato que cae. Se deshace con "No es mío".
+- **R12 — BLE vuelve solo tras apagar y encender el Bluetooth** *(petición del usuario 2026-11-25, prueba de campo
+  con la 1.6.157)*: con el Bluetooth apagado a media sesión y encendido después, la banda BLE no volvió a conectar
+  aunque se oían sus anuncios. Desde ahora:
+  - Al apagarse el Bluetooth se paran los escaneos y se cierran las conexiones BLE; sus señales pasan a "sin
+    conexión" (no ocupan hueco). Al encenderse, el escaneo arranca solo y la banda vuelve en segundos.
+  - Nunca hay más de un escaneo por tipo (pulso, cadencia).
+  - Una conexión BLE que lleva 20 s (pulso) o 30 s (cadencia) sin ninguna notificación se cierra y se vuelve a
+    enganchar al oírla. "Sin contacto con la piel" (R2.1) sigue llegando como notificación y no cuenta como silencio.
+- **R13 — ANT+ no machaca el pincho y avisa si no lo detecta** *(petición del usuario 2026-11-25, misma prueba)*:
+  con la pantalla apagada, la búsqueda ANT+ cada 15 s (aunque HR1 ya estuviera conectado) dejó el pincho USB "no
+  detectado" hasta el final y la app reintentó sin fin. Desde ahora:
+  - Con algún canal ANT+ recibiendo (pulso o cadencia), la búsqueda de aparatos nuevos se repite cada 120 s, no cada
+    15 s. Sin canales, cada 15 s como antes. "Reconectar" y la hoja buscan al momento.
+  - Con el pincho "no detectado", los reintentos se espacian: 30 s, 60 s, 120 s y 300 s como máximo. Vuelve a lo
+    normal al primer éxito, al pulsar "Reconectar" o al enchufar el pincho.
+  - Mientras dure, la barra de sensores dice "Pincho ANT+ no detectado".
+  - Ajuste del usuario (fuera de la app): las tres apps de ANT en "Aplicaciones que nunca entran en suspensión" y
+    "No restringido".
 
 ## Restricciones
 - Sin cambios en Room, Gradle ni `NavGraph.kt`. Sin cambiar el ciclo de vida de `WorkoutService` /
@@ -106,7 +124,7 @@ quedan fallos:
   baterías) y solo se amplía (R7.1 añade `SlotStatus.fresh`: el hueco tiene dato reciente; T-06 añade
   `hrSignals()` / `cadenceSignals()`, señales visibles con su aparato y hueco, y `unlinkSession()` para la hoja;
   R10 añade `ignoreSignals()` / `unignoreSignal()` / `hrIgnored()` / `cadenceIgnored()`; R11 añade `hrToAsk()` /
-  `cadenceToAsk()` / `approveSignal()`). Reconectar (R8.2) usa el `resetFlows()` que ya existía. El aviso de R11 se
+  `cadenceToAsk()` / `approveSignal()`; R13 añade `antAdapterState()`, solo lectura). Reconectar (R8.2) usa el `resetFlows()` que ya existía. El aviso de R11 se
   dibuja en `MainActivity` (encima de `NavGraph()`, sin tocar `NavGraph.kt`).
 - Registro de aparatos en SharedPreferences; migra los vínculos de la spec 003 sin perderlos.
 

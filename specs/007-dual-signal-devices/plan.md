@@ -476,6 +476,70 @@ hueco y se pregunta a los 15 s; la cuenta vuelve a cero si deja de dar dato; apr
 un aparato guardado entra sin preguntar; la otra señal de un aparato aprobado no pregunta; un ANT+ sin aprobar no
 desplaza a un BLE propio; ignorar quita el aviso. La franja y el guardado en el registro: prueba real.
 
+### 15. Arreglos tras la prueba del 2026-11-25 (1.6.157, sesión 7701dccb; R12, R13; fuera de T-06 y T-07)
+**Motivo:** en la prueba de campo de la spec 008, ANT+ se cayó con la pantalla apagada y el BLE no volvió a
+conectar al encender el Bluetooth. Se hace primero A y, tras la prueba del usuario, B.
+
+**Causa BLE (vista en `dumpsys bluetooth_manager`):** al apagar el Bluetooth, el sistema da de baja la conexión de la
+app (11:30:58, `unregisterClient(android)`) antes de cortar el enlace. Por eso la app nunca recibe
+`STATE_DISCONNECTED` y la dirección se queda en `gatts`. El vigilante de 20 s no actúa porque el aparato ya estaba
+conectado. Al encender, `onScanResult` descarta los 1138 anuncios recibidos por `gatts.containsKey`. Además, Samsung
+deja la radio en modo solo BLE, y `ensureBle` borraba la referencia del escaneo sin pararlo: quedaron 4 escaneos
+de la app (2 de pulso, 2 de cadencia).
+
+**Causa ANT+ (logcat del sistema):**
+- Samsung congela (Freecess) `com.dsi.ant.usbservice` y `com.dsi.ant.service.socket` entre búsquedas. La búsqueda
+  se repetía cada 15 s aunque HR1 estuviera conectado: el pulso quiere 2 huecos y la cadencia busca sin aparato.
+- Cada ciclo descongela y vuelve a congelar el servicio USB. Resultado: «Failed to write/claim USB», huecos de
+  6–10 s y, al final, ADAPTER_NOT_DETECTED sin fin. El servicio llegó a cerrarse a las 12:20:24.
+- `AntRadio.onStopped` reintentaba cada 15 s sin espaciar ni avisar.
+
+**A — BLE** (`HeartRateHub`, `CadenceHub`, nuevo `sensor/BleLinkWatch.kt`, lógica pura):
+- **Receptor `ACTION_STATE_CHANGED`**: se registra en `start()` y se quita en `stopRadios()`; aviso en hilo de
+  fondo.
+  - `STATE_TURNING_OFF` / `STATE_OFF`: `onBluetoothOff()` = `stopBle()` + las señales BLE pasan a
+    `connected=false` + log «Bluetooth apagado, radios BLE reiniciadas».
+  - `STATE_ON`: `startBle()`.
+  - `ensureBle()` (cada 5 s) pasa a `@Synchronized`; si ve el Bluetooth apagado con escaneo o conexiones vivas,
+    llama a `onBluetoothOff()`.
+- **Escaneo**: se guarda el `BluetoothLeScanner` con que se arrancó y se para con él (pedirlo de nuevo con el
+  Bluetooth a medias puede dar nulo).
+  - `startBle()` para antes el escaneo previo.
+  - Un callback que ya no es el actual ignora sus resultados (`this !== scanCallback`), así que un escaneo escapado
+    no conecta nada.
+  - `connectBle` no conecta con el Bluetooth apagado (Samsung en modo solo BLE).
+- **`BleLinkWatch(silentMs)`**: la conexión entra al suscribirse (`onServicesDiscovered`). Cada notificación de la
+  medida (con o sin contacto con la piel, R2.1) renueva su hora. `silent(now)` da las direcciones mudas.
+  - Se quita al desconectar, en `stopBle()` y al cerrarla por silencio.
+  - En `tick()`, cada conexión muda se cierra, sale de `gatts`, pasa a `connected=false` y el escaneo la vuelve a
+    enganchar. Log «sin datos N s, se reconecta».
+  - Umbral: 20 s en pulso y 30 s en cadencia (una cadencia BLE parada puede notificar menos).
+- **Impacto (Clave 3):** sin cambios en servicios, `NavGraph.kt`, Room, Gradle ni en `SensorManager`. El receptor
+  vive con las radios del hub (`start`/`stopRadios`).
+
+**B — ANT+** (`AntRadio`, nuevo `sensor/AntRetryPolicy.kt`, lógica pura; `SensorManager.antAdapterState()`;
+`SensorBar`):
+- `AntRetryPolicy`:
+  - `pauseMs(anyChannelTracking)`: 15 s sin canales, 120 s con alguno.
+  - `onAdapterFailure()`: 30, 60, 120 y 300 s como tope; vale para ADAPTER_NOT_DETECTED y OTHER_FAILURE de la
+    búsqueda y de `requestAccess`.
+  - `onSuccess()` y `reset()` (Reconectar o pincho enchufado) vuelven a lo normal.
+- `AntRadioClient` gana `antTracking(): Boolean` (algún canal recibiendo).
+- `AntRadio.adapterState: StateFlow<AntAdapterState>` (`Ok` / `NotDetected(retryAtMs)`). La `SensorBar` muestra
+  «Pincho ANT+ no detectado».
+- `onAntLost`: el `close()` del canal sale del `tick()` sincronizado y pasa a la cadena `closing` de `AntRadio`.
+- Ajuste del usuario: las tres apps `com.dsi.ant.*` en «Aplicaciones que nunca entran en suspensión» y «No
+  restringido».
+- **Experimento condicional (solo si con lo anterior sigue la congelación):** enlace persistente a
+  `AntRadioService` mientras funcionen los hubs (`<queries>` en el manifiesto). Se valida aparte con
+  `dumpsys activity processes` y el logcat de Freecess.
+
+**Tests:**
+- `BleLinkWatchTest` para A.
+- `AntRetryPolicyTest` para B.
+- El receptor y el GATT se comprueban en la prueba real (apagar y encender el Bluetooth; `dumpsys
+  bluetooth_manager` con 2 escaneos de la app).
+
 ## Archivos
 - Nuevos: `sensor/SensorDeviceRegistry.kt`, `sensor/PairingPolicy.kt`, `sensor/DualSlotAllocator.kt`,
   `sensor/CadenceHub.kt`, `sensor/AntRadio.kt`, `sensor/CscParser.kt`, `ui/components/SensorSlotBadge.kt`, `ui/components/SensorBar.kt`,

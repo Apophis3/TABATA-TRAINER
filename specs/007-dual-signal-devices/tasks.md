@@ -81,6 +81,18 @@ usuario confirme la anterior con evidencia. El agente **no** ejecuta Gradle ni `
   fuera de T-06 y T-07)*: un pulsómetro o cadenciómetro sin guardar no ocupa hueco; tras 15 s oyéndose sale un aviso
   arriba "¿Es tuyo?" con "Sí, usar" (lo guarda) y "No es mío" (lo ignora). *Código hecho 2026-11-22; pendiente de
   prueba real; tests 243/243 en verde (1.6.143, 2026-11-22 17:39).*
+- [ ] Arreglos tras la prueba del 2026-11-25 — **BLE** *(pedidos por el usuario; `spec.md` R12, `plan.md` §15 A;
+  fuera de T-06 y T-07)*: al apagar el Bluetooth se paran los escaneos y se cierran las conexiones; al encenderlo,
+  la banda vuelve sola; nunca dos escaneos del mismo tipo; una conexión muda 20 s (pulso) o 30 s (cadencia) se
+  reconecta.
+  Código hecho (2026-11-25, sin compilar ni probar): `BleLinkWatch` + `BleLinkWatchTest` (+5 → suite esperada
+  **332**); en `HeartRateHub` y `CadenceHub`: receptor `ACTION_STATE_CHANGED`, `ensureBle` como respaldo, escáner
+  guardado y parado con él, escaneos viejos sin efecto, `connectBle` no conecta con el Bluetooth apagado y
+  `checkBleSilent` en el tick.
+- [ ] Arreglos tras la prueba del 2026-11-25 — **ANT+** *(pedidos por el usuario; `spec.md` R13, `plan.md` §15 B;
+  fuera de T-06 y T-07; se empieza tras probar el de BLE)*: búsqueda cada 120 s con un canal enganchado;
+  reintentos espaciados (30 s → 300 s) con el pincho no detectado; aviso «Pincho ANT+ no detectado»; cierre de
+  canal fuera del tick.
 - [ ] T-07 **Validación real (usuario).** Una banda dual; dos bandas; cadenciómetro dual; caída/vuelta ANT+.
   Incluye lo aplazado: cadencia real de T-03 (C1 al pedalear, 0 rpm en ~3 s al parar sin perder hueco, C1/C2 con
   dos aparatos) y, de T-02, HR2 apagado en Home al quitar una banda.

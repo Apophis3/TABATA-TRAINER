@@ -1,6 +1,7 @@
 package com.tuapp.tabatatrainer.sensor
 
 import android.annotation.SuppressLint
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
@@ -8,11 +9,15 @@ import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.ParcelUuid
 import com.dsi.ant.plugins.antplus.pcc.AntPlusBikeCadencePcc
@@ -66,6 +71,7 @@ class CadenceHub @Inject constructor(
     companion object {
         const val STALE_MS = 5_000L
         private const val BLE_CONNECT_TIMEOUT_MS = 20_000L
+        private const val BLE_SILENT_MS = 30_000L        // conexión suscrita sin notificaciones: se cierra y se reengancha (R12)
         private const val SLOTS = 2
         private const val HISTORY = 20             // muestras (1 Hz) por dispositivo (≥ PairingThresholds.CADENCE.minSamples)
         private val KIND = SensorKind.CADENCE
@@ -145,6 +151,7 @@ class CadenceHub @Inject constructor(
         Timber.d("🚴 CadenceHub: inicio")
         slotFlows.forEach { it.tryEmit(CadenceReading.Scanning) }
         startAnt()
+        registerBluetoothReceiver()
         startBle()
         tickJob = scope.launch {
             var n = 0
@@ -171,6 +178,7 @@ class CadenceHub @Inject constructor(
         Timber.d("🚴 CadenceHub: parada (huecos recordados)")
         tickJob?.cancel()
         stopAnt()
+        unregisterBluetoothReceiver()
         stopBle()
         _devices.value = emptyMap()
         history.clear(); pairing.reset(); allocator.pause()
@@ -282,6 +290,7 @@ class CadenceHub @Inject constructor(
         val now = System.currentTimeMillis()
         dropIgnored()
         checkAntLost(now)
+        checkBleSilent(now)
         zeroStopped(now)
         val devs = _devices.value
         updateHistory(devs, now)
@@ -486,20 +495,86 @@ class CadenceHub @Inject constructor(
     private val bluetoothAdapter get() = (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
     private val gatts = ConcurrentHashMap<String, BluetoothGatt>()
     private val parsers = ConcurrentHashMap<String, CscParser>()
-    private var scanCallback: ScanCallback? = null
+    private val bleWatch = BleLinkWatch(BLE_SILENT_MS)
+    private var scanner: BluetoothLeScanner? = null   // el escáner con que se arrancó: se para con él (R12)
+    @Volatile private var scanCallback: ScanCallback? = null
     private var bleUnavailableLogged = false
+    private var btReceiverRegistered = false
 
-    /** Arranca el escaneo si el Bluetooth se enciende con el hub ya en marcha */
+    /** Apagar y encender el Bluetooth (R12): el sistema puede dar de baja las conexiones sin avisar a la app */
+    private val btReceiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context?, intent: Intent?) {
+            when (intent?.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1)) {
+                BluetoothAdapter.STATE_TURNING_OFF, BluetoothAdapter.STATE_OFF -> scope.launch { onBluetoothOff() }
+                BluetoothAdapter.STATE_ON -> scope.launch { ensureBle() }
+            }
+        }
+    }
+
+    private fun registerBluetoothReceiver() {
+        if (btReceiverRegistered) return
+        try {
+            val filter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.registerReceiver(btReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                context.registerReceiver(btReceiver, filter)
+            }
+            btReceiverRegistered = true
+        } catch (e: Exception) {
+            Timber.w(e, "🚴 BLE: no se pudo vigilar el Bluetooth")
+        }
+    }
+
+    private fun unregisterBluetoothReceiver() {
+        if (!btReceiverRegistered) return
+        btReceiverRegistered = false
+        try { context.unregisterReceiver(btReceiver) } catch (_: Exception) {}
+    }
+
+    /**
+     * Arranca el escaneo si el Bluetooth se enciende con el hub ya en marcha y, si está apagado con escaneo o
+     * conexiones vivas, los cierra. Respaldo cada 5 s del receptor (R12)
+     */
+    @Synchronized
     private fun ensureBle() {
         if (!running) return
         val enabled = bluetoothAdapter?.isEnabled == true
-        if (scanCallback != null && !enabled) { scanCallback = null; Timber.w("🚴 BLE: Bluetooth apagado") }
-        if (scanCallback == null && enabled) startBle()
+        if (!enabled && (scanCallback != null || gatts.isNotEmpty())) onBluetoothOff()
+        if (enabled && scanCallback == null) startBle()
+    }
+
+    /** Bluetooth apagándose (R12): fuera escaneo y conexiones; sus señales dejan de contar como conectadas */
+    @Synchronized
+    private fun onBluetoothOff() {
+        if (!running) return
+        if (scanCallback == null && gatts.isEmpty()) return
+        stopBle()
+        _devices.update { m ->
+            m.mapValues { (_, d) -> if (d.protocol == "BLE" && d.connected) d.copy(connected = false, rpm = 0) else d }
+        }
+        Timber.w("🚴 BLE: Bluetooth apagado, radios BLE reiniciadas")
+    }
+
+    /** Conexiones suscritas que llevan [BLE_SILENT_MS] sin notificar: se cierran y el escaneo las reengancha (R12) */
+    @SuppressLint("MissingPermission")
+    private fun checkBleSilent(now: Long) {
+        for (addr in bleWatch.silent(now)) {
+            bleWatch.forget(addr)
+            val g = gatts.remove(addr) ?: continue
+            val id = "BLE:$addr"
+            Timber.w("🚴 BLE ${_devices.value[id]?.name ?: addr}: sin datos ${BLE_SILENT_MS / 1000} s, se reconecta")
+            parsers.remove(id)
+            try { g.disconnect(); g.close() } catch (_: Exception) {}
+            update(id) { it.copy(connected = false, rpm = 0) }
+        }
     }
 
     /** Un único escaneo continuo (no se para y arranca en bucle) */
     @SuppressLint("MissingPermission")
+    @Synchronized
     private fun startBle() {
+        stopScan()   // nunca dos escaneos a la vez (R12)
         val scanner = bluetoothAdapter?.takeIf { it.isEnabled }?.bluetoothLeScanner ?: run {
             if (!bleUnavailableLogged) Timber.w("🚴 BLE: no disponible")
             bleUnavailableLogged = true
@@ -507,6 +582,7 @@ class CadenceHub @Inject constructor(
         }
         val cb = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
+                if (this !== scanCallback) return   // escaneo viejo que el sistema no llegó a parar: no conecta nada
                 val device = result.device
                 if (!gatts.containsKey(device.address) && !isIgnored("BLE:${device.address}")) {
                     val name = result.scanRecord?.deviceName ?: safeName(device) ?: "BLE ${device.address.takeLast(5)}"
@@ -514,8 +590,10 @@ class CadenceHub @Inject constructor(
                 }
             }
             override fun onScanFailed(errorCode: Int) {
+                if (this !== scanCallback) return
                 Timber.e("🚴 BLE: escaneo falló ($errorCode)")
                 scanCallback = null
+                this@CadenceHub.scanner = null
                 if (running) scope.launch { delay(5_000); if (running && scanCallback == null) startBle() }
             }
         }
@@ -523,6 +601,7 @@ class CadenceHub @Inject constructor(
             val filter = ScanFilter.Builder().setServiceUuid(ParcelUuid(CSC_SERVICE)).build()
             val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_BALANCED).build()
             scanner.startScan(listOf(filter), settings, cb)
+            this.scanner = scanner
             scanCallback = cb
             bleUnavailableLogged = false
             Timber.d("🚴 BLE: escaneo iniciado")
@@ -537,6 +616,7 @@ class CadenceHub @Inject constructor(
     @SuppressLint("MissingPermission")
     private fun connectBle(device: BluetoothDevice, name: String) {
         if (!running || isIgnored("BLE:${device.address}")) return
+        if (bluetoothAdapter?.isEnabled != true) return   // Bluetooth apagado (Samsung deja la radio en modo solo BLE)
         val id = "BLE:${device.address}"
         val callback = object : BluetoothGattCallback() {
             override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
@@ -547,7 +627,7 @@ class CadenceHub @Inject constructor(
                     upsert(id) { (it ?: CadDevice(id, name, "BLE")).copy(connected = false, rpm = 0) }
                     parsers.remove(id)
                     g.close()
-                    gatts.remove(device.address, g)
+                    if (gatts.remove(device.address, g)) bleWatch.forget(device.address)
                     if (running) scope.launch { delay(3_000); if (running && !gatts.containsKey(device.address)) connectBle(device, name) }
                 }
             }
@@ -563,6 +643,7 @@ class CadenceHub @Inject constructor(
                 }
                 writeNotify(g, desc)
                 upsert(id) { CadDevice(id, name, "BLE", connected = true) }
+                bleWatch.onConnected(device.address, System.currentTimeMillis())
                 Timber.d("🚴 BLE $name: conectado")
             }
 
@@ -621,6 +702,7 @@ class CadenceHub @Inject constructor(
                     BATTERY_LEVEL -> onBattery(id, SensorBattery.parseBleBatteryLevel(value))
                     CSC_MEASUREMENT -> {
                         val parser = parsers[id] ?: return   // ya desconectado: no revivir el aparato
+                        bleWatch.onNotify(device.address, System.currentTimeMillis())
                         val rpm = parser.onMeasurement(value, System.currentTimeMillis())
                         if (rpm != null) onRpm(id, rpm) else onAlive(id)
                     }
@@ -663,12 +745,22 @@ class CadenceHub @Inject constructor(
         }
     }
 
+    /** Para el escaneo con el mismo escáner con que se arrancó (pedirlo de nuevo con el Bluetooth a medias da nulo) */
     @SuppressLint("MissingPermission")
-    private fun stopBle() {
-        try { scanCallback?.let { bluetoothAdapter?.bluetoothLeScanner?.stopScan(it) } } catch (_: Exception) {}
+    private fun stopScan() {
+        val cb = scanCallback ?: return
+        try { (scanner ?: bluetoothAdapter?.bluetoothLeScanner)?.stopScan(cb) } catch (_: Exception) {}
         scanCallback = null
+        scanner = null
+    }
+
+    @SuppressLint("MissingPermission")
+    @Synchronized
+    private fun stopBle() {
+        stopScan()
         gatts.values.forEach { try { it.disconnect(); it.close() } catch (_: Exception) {} }
         gatts.clear()
         parsers.clear()
+        bleWatch.clear()
     }
 }
