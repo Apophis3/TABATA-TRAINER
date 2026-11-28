@@ -6,6 +6,17 @@ memoria privada de Claude. **Lo más reciente arriba.**
 
 ---
 
+## 2026-11-28 (tarde) — Salida de 3 h analizada; solo rama `main`
+- **Git:** `main` estaba 2 commits por detrás de `spec-008-raw-logging` (BLE de la spec 007 y T-08). Se avanzó
+  `main` hasta la 008 sin mezcla y se borraron las ramas 006, 007 y 008 (local y GitHub). A partir de ahora se
+  trabaja solo en `main`; no se crean ramas salvo que el usuario lo pida.
+- **Salida 1.6.163 (14,7 km, 3 h):** informe completo en `specs/008-raw-logging/salida_2026-11-28.md`. T-08 se ve
+  bien en el móvil (5 archivos, 0 errores); falta que el usuario la dé por hecha.
+- Hallazgos clave: el mapa en vivo solo guarda los últimos 1000 puntos (no se ve la ruta entera); al guardar una
+  vuelta no hay confirmación; desnivel de +471 m en ruta llana (ruido de altitud GPS); el último tramo no se guarda
+  como vuelta al parar; al hacer foto la app entera se congela ~5 s; el cambio ANT+ → Bluetooth no deja rastro.
+- Pendiente: el usuario elige por dónde empezar la spec 009. Sin código tocado.
+
 ## 2026-11-28 — Spec 008 · T-08 Satélites, barómetro por segundo, llamadas (código hecho, sin compilar)
 - Pedido por el usuario para una salida andando de 2 h; plan en `tasks.md` T-08, aprobado en el mismo mensaje.
   En 1.6.158–1.6.160 no estaban satélites, barómetro por segundo ni llamadas; la nota de mA solo estaba en
