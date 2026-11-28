@@ -6,6 +6,21 @@ memoria privada de Claude. **Lo más reciente arriba.**
 
 ---
 
+## 2026-11-28 (noche) — Spec 009 · T-01, T-02 y T-03 (código hecho, sin compilar)
+- Aprobado por el usuario en el chat; se hicieron las tres seguidas porque estaba fuera 1 h. Spec, plan y tareas
+  en `specs/009-route-laps-stride/`. Sin rama: todo en `main`.
+- **T-01 Ruta entera:** `util/map/RouteSimplifier` (quita puntos que no cambian la forma más de 2 m; conserva el
+  primero y el último) sustituye al tope de 1000 puntos en `FreeRideService.addMapPoint`. Room y registro bruto
+  igual que antes. Botón «Ver todo»/«Seguir» arriba a la derecha del mapa en vivo (`MapFollowPolicy` con
+  `isOverview`, `shouldRecordUserZoom`, `canShowOverview`).
+- **T-02 Vuelta:** al guardarse una vuelta manual, vibración de 80 ms (servicio), aviso «🏁 Vuelta N» con zoom de
+  entrada (1,5 s) y banderita amarilla en el mapa (`LapMark`, `lapMarks`, `lapEvents`).
+- **T-03 Zancada por velocidad:** `util/laps/StrideSpeedBins` (bloques de 10 s, tramos de 1 km/h hasta 7 y de 2
+  km/h después), columna `workout_sessions.strideBySpeed` (Room **10 → 11**, `ALTER TABLE` nullable) y tarjeta
+  «Zancada según velocidad» en el detalle (tramos con 100 pasos o más).
+- Tests +27 → suite esperada **373** (346 + 27). Sin tocar `NavGraph`, `WorkoutService` ni `SensorManager`.
+- Pendiente: el usuario compila, pasa los tests, instala y hace una ruta corta (T-04).
+
 ## 2026-11-28 (tarde) — Salida de 3 h analizada; solo rama `main`
 - **Git:** `main` estaba 2 commits por detrás de `spec-008-raw-logging` (BLE de la spec 007 y T-08). Se avanzó
   `main` hasta la 008 sin mezcla y se borraron las ramas 006, 007 y 008 (local y GitHub). A partir de ahora se

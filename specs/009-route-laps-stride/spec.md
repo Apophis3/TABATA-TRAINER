@@ -26,7 +26,7 @@ Origen: salida del 2026-11-28 (`specs/008-raw-logging/salida_2026-11-28.md`, §3
 - **RF-2.1** En el mapa en vivo hay un botón «Ver todo» (arriba a la derecha). Al pulsarlo, la cámara encuadra la
   ruta entera más la posición actual.
 - **RF-2.2** Mientras está en «Ver todo», el mapa **no** sigue la posición (no vuelve solo a los 10 s) y el botón se
-  ve activado. El usuario puede mover y hacer zoom libremente.
+  ve activado (amarillo, con el texto «Seguir»). El usuario puede mover y hacer zoom libremente.
 - **RF-2.3** Al pulsarlo otra vez, se sale de «Ver todo» y el mapa vuelve a seguir la posición con el zoom que el
   usuario había elegido antes (el de «Ver todo» no cuenta como zoom elegido).
 - **RF-2.4** Con menos de 2 puntos distintos el botón no hace nada.
@@ -45,7 +45,8 @@ Origen: salida del 2026-11-28 (`specs/008-raw-logging/salida_2026-11-28.md`, §3
 - **RF-4.1** Durante la ruta, cada bloque de **10 s** en marcha (sin pausa) se clasifica por su velocidad media
   (distancia GPS del bloque / 10 s) y suma sus pasos y su distancia al tramo de velocidad que le toca.
 - **RF-4.2** Tramos: de **1 km/h** hasta 7 km/h (1–2, 2–3, …, 6–7) y de **2 km/h** a partir de 7 (7–9, 9–11, …).
-  Por debajo de 1 km/h (parado) no cuenta. Un bloque con menos de 5 pasos no cuenta.
+  Por debajo de 1 km/h (parado) o por encima de 25 km/h (salto de GPS) no cuenta. Un bloque con menos de 5 pasos
+  no cuenta. Al pausar, el bloque a medias se descarta.
 - **RF-4.3** Al parar, los tramos se guardan con la sesión.
 - **RF-4.4** En el detalle de la sesión aparece la tarjeta «Zancada según velocidad»: una fila por tramo con
   zancada (distancia / pasos, 2 decimales), pasos y tiempo. Solo se muestran los tramos con **100 pasos o más**.

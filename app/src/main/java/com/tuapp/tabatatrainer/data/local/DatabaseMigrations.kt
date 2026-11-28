@@ -188,6 +188,20 @@ object DatabaseMigrations {
         }
     }
 
+    /** Sentencias de la migración 10 → 11 (spec 009, R4): zancada por tramos de velocidad. */
+    val MIGRATION_10_11_STATEMENTS = listOf(
+        "ALTER TABLE workout_sessions ADD COLUMN strideBySpeed TEXT"
+    )
+
+    /**
+     * Migración de versión 10 a 11: columna nullable, las sesiones antiguas quedan con null
+     */
+    val MIGRATION_10_11 = object : Migration(10, 11) {
+        override fun migrate(database: SupportSQLiteDatabase) {
+            MIGRATION_10_11_STATEMENTS.forEach { database.execSQL(it) }
+        }
+    }
+
     /**
      * Lista de todas las migraciones disponibles
      */
@@ -196,6 +210,7 @@ object DatabaseMigrations {
         MIGRATION_5_6,
         MIGRATION_6_7,
         MIGRATION_8_9,
-        MIGRATION_9_10
+        MIGRATION_9_10,
+        MIGRATION_10_11
     )
 }

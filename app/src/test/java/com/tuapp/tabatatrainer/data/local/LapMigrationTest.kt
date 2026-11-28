@@ -43,7 +43,8 @@ class LapMigrationTest {
     @Test
     fun migrations_form_an_unbroken_chain_to_the_current_version() {
         val byStart = DatabaseMigrations.ALL_MIGRATIONS.associateBy { it.startVersion }
-        // 4→5→6→7 y 8→9→10 (el 7→8 no cambió el esquema y no tiene migración propia)
+        // 4→5→6→7 y 8→9→10→11 (el 7→8 no cambió el esquema y no tiene migración propia)
+        assertEquals(11, byStart.getValue(10).endVersion)
         assertEquals(10, byStart.getValue(9).endVersion)
         assertEquals(9, byStart.getValue(8).endVersion)
     }

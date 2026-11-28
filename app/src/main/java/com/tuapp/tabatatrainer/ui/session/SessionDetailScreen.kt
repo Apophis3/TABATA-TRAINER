@@ -37,6 +37,8 @@ import com.tuapp.tabatatrainer.util.ExportUtils
 import com.tuapp.tabatatrainer.util.laps.ManualLapSummary
 import com.tuapp.tabatatrainer.util.laps.SessionDeletion
 import com.tuapp.tabatatrainer.util.laps.SessionLapSummaryModel
+import com.tuapp.tabatatrainer.util.laps.StrideBin
+import com.tuapp.tabatatrainer.util.laps.StrideSpeedBins
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -201,6 +203,15 @@ fun SessionDetailScreen(
                 if (sess.gpsEnabled && distance != null && distance > 0) {
                     Spacer(modifier = Modifier.height(12.dp))
                     GpsMetricsGrid(session = sess)
+                }
+
+                // Spec 009, R4: zancada según la velocidad (solo tramos con pasos suficientes)
+                val strideBins = remember(sess.strideBySpeed) {
+                    StrideSpeedBins.visible(StrideSpeedBins.decode(sess.strideBySpeed))
+                }
+                if (strideBins.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    StrideBySpeedCard(strideBins)
                 }
 
                 // Resumen por vuelta manual (solo si hubo)
@@ -946,6 +957,42 @@ private fun ManualLapsSummaryCard(summaries: List<ManualLapSummary>) {
                         // Relleno para que la última fila no estire sus celdas
                         repeat(3 - rowItems.size) { Spacer(modifier = Modifier.weight(1f)) }
                     }
+                }
+            }
+        }
+    }
+}
+
+/** Spec 009, RF-4.4: una fila por tramo de velocidad: zancada, pasos y tiempo. */
+@Composable
+private fun StrideBySpeedCard(bins: List<StrideBin>) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "Zancada según velocidad",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(modifier = Modifier.fillMaxWidth()) {
+                listOf("Velocidad", "Zancada", "Pasos", "Tiempo").forEach { header ->
+                    Text(
+                        header,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            bins.forEach { bin ->
+                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    Text("${bin.lowKmh}–${bin.highKmh} km/h", modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                    Text(String.format(Locale.getDefault(), "%.2f m", bin.strideM), modifier = Modifier.weight(1f))
+                    Text("${bin.steps}", modifier = Modifier.weight(1f))
+                    Text(
+                        String.format(Locale.getDefault(), "%d:%02d", bin.seconds / 60, bin.seconds % 60),
+                        modifier = Modifier.weight(1f)
+                    )
                 }
             }
         }

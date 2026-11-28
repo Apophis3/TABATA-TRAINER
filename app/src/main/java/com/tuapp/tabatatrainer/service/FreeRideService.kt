@@ -34,6 +34,7 @@ import com.tuapp.tabatatrainer.util.laps.LapBook
 import com.tuapp.tabatatrainer.util.laps.LapRecord
 import com.tuapp.tabatatrainer.util.laps.LapType
 import com.tuapp.tabatatrainer.util.laps.PaceCalculator
+import com.tuapp.tabatatrainer.util.laps.StrideSpeedBins
 import com.tuapp.tabatatrainer.util.map.RouteSimplifier
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
@@ -189,6 +190,9 @@ class FreeRideService : Service() {
     // Podómetro: último valor bruto visto y pasos de los últimos 10 s (para pasos/min)
     private var lastRawSteps: Long? = null
     private val recentStepDeltas = ArrayDeque<Int>()
+
+    // Spec 009, R4: zancada según la velocidad (bloques de 10 s). Acceso siempre con synchronized.
+    private val strideSpeedBins = StrideSpeedBins()
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val binder = LocalBinder()
@@ -597,6 +601,7 @@ class FreeRideService : Service() {
         autoWindowStartCounters = BlockCounters()
         autoLapTracker.reset()
         kmAlertGate.reset()
+        synchronized(strideSpeedBins) { strideSpeedBins.reset() }
         totalElevationGain = 0f
         previousAltitude = null
 
@@ -662,6 +667,7 @@ class FreeRideService : Service() {
         timerJob?.cancel()
         gpsManager.pause()
         paceCalculator.reset()
+        synchronized(strideSpeedBins) { strideSpeedBins.interrupt() }   // el bloque a medias no cuenta
         _stats.update { it.copy(isPaused = true, paceSecPerKm = null) }
         updateNotification("Pausado", "Toca para continuar")
 
@@ -692,8 +698,9 @@ class FreeRideService : Service() {
 
         // Foto de las vueltas AHORA: el reset a idle no debe poder vaciarlas antes de guardarlas
         val lapsToSave = _laps.value
+        val strideToSave = synchronized(strideSpeedBins) { strideSpeedBins.encode() }.takeIf { it.isNotEmpty() }
         serviceScope.launch {
-            saveFinalStats(lapsToSave)
+            saveFinalStats(lapsToSave, strideToSave)
             onSaved?.let { withContext(Dispatchers.Main) { it() } }
         }
 
@@ -950,6 +957,8 @@ class FreeRideService : Service() {
                 avgStrideM = strideOf(it.totalDistanceMeters, steps)
             )
         }
+        val now = _stats.value
+        synchronized(strideSpeedBins) { strideSpeedBins.onSecond(now.steps, now.totalDistanceMeters.toDouble()) }
     }
 
     /** Ritmo en vivo (s/km) sobre los últimos 10 s en movimiento */
@@ -1107,7 +1116,7 @@ class FreeRideService : Service() {
         }
     }
 
-    private suspend fun saveFinalStats(lapsToSave: List<LapData>) {
+    private suspend fun saveFinalStats(lapsToSave: List<LapData>, strideBySpeed: String?) {
         currentSessionId?.let { sessionId ->
             val stats = _stats.value
             val gpsStats = gpsManager.getCurrentStats()
@@ -1136,6 +1145,7 @@ class FreeRideService : Service() {
                         avgStrideM = strideOf(gpsStats.totalDistanceMeters, stats.steps).takeIf { it > 0f },
                         avgStepCadence = if (stats.steps > 0 && stats.totalTimeSeconds > 0)
                             stats.steps * 60f / stats.totalTimeSeconds else null,
+                        strideBySpeed = strideBySpeed,   // spec 009, R4
                         isCompleted = true
                     )
                 )

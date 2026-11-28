@@ -150,6 +150,8 @@ data class WorkoutSessionEntity(
     var totalSteps: Int? = null,
     var avgStrideM: Float? = null,
     var avgStepCadence: Float? = null,
+    // Spec 009, R4: zancada por tramos de velocidad, "tramo:pasos:distancia_m:segundos;..." (StrideSpeedBins)
+    var strideBySpeed: String? = null,
     // Tipo de actividad
     var activityType: String = "TABATA"
 )
