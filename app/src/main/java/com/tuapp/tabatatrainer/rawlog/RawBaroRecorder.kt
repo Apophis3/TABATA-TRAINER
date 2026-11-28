@@ -11,8 +11,8 @@ data class BaroSensorInfo(
 )
 
 /**
- * Parte sin Android de `baro.csv` (spec 008, R9; plan §5): abre el archivo, decide con [BaroDecimator] qué
- * muestras se escriben (una cada ≥ 950 ms de hora del sensor; las demás se descartan sin promediar y se cuentan),
+ * Parte sin Android de `baro.csv` (spec 008, R9; plan §5; T-08): abre el archivo, junta las lecturas por segundo
+ * con [BaroSecondAverager] (una fila por segundo con la media, el número de lecturas, la mínima y la máxima),
  * anota `source_started` / `source_error` y guarda los datos del sensor para `meta.json`.
  * El registro del sensor está en [RawBaroSource].
  *
@@ -20,7 +20,7 @@ data class BaroSensorInfo(
  */
 class RawBaroRecorder(
     private val core: RawSessionCore,
-    val decimator: BaroDecimator = BaroDecimator()
+    val averager: BaroSecondAverager = BaroSecondAverager()
 ) {
     private var writer: RawFileWriter? = null
 
@@ -64,12 +64,26 @@ class RawBaroRecorder(
         fail(stamp, reason)
     }
 
-    /** Una muestra del sensor. Se escribe solo si el decimador la acepta (búfer normal de 5 s). */
-    fun onSample(stamp: RawStamp, sensorTsNs: Long, pressureHpa: Float, accuracy: Int?) {
+    /** Una lectura del sensor. Si es de un segundo nuevo, se escribe la fila del anterior (búfer normal de 5 s). */
+    fun onSample(stamp: RawStamp, pressureHpa: Float) {
         if (!core.isOpen || !started) return
-        if (decimator.accept(sensorTsNs)) {
-            writer?.append(BaroSample(stamp, sensorTsNs, pressureHpa, accuracy))
-        }
+        write(averager.add(stamp, pressureHpa))
+    }
+
+    /** Temporizador de 1 s: escribe el segundo abierto si ya pasó (así no espera a la siguiente lectura). */
+    fun tick(now: RawStamp) {
+        if (!core.isOpen || !started) return
+        write(averager.closeIfPast(now))
+    }
+
+    /** Al parar, antes de cerrar la sesión: escribe el último segundo. */
+    fun flushPending() {
+        if (!core.isOpen || !started) return
+        write(averager.drain())
+    }
+
+    private fun write(row: BaroSample?) {
+        if (row != null) writer?.append(row)
     }
 
     private fun fail(stamp: RawStamp, reason: String) {

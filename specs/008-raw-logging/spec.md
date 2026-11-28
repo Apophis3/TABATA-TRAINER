@@ -42,8 +42,9 @@ no cambia.
 - **R6 — Escritura.** Con búfer; se vacía cada 5 s y al parar. Los eventos importantes (pantalla, servicio,
   sesión, ubicación disponible, error) se vacían al instante. Si falla el almacenamiento, la app sigue sin
   ventanas ni avisos: se anota `write_error` en `events.csv` si aún se puede y se deja de escribir ese archivo.
-- **R7 — Sin cálculos.** No se filtra, no se suaviza, no se convierte presión en altitud, no se hacen medias.
-  Lo único que se descarta son muestras de barómetro de más (R9), y se cuenta cuántas.
+- **R7 — Sin cálculos.** No se filtra, no se suaviza, no se convierte presión en altitud. Desde T-08
+  (2026-11-28, pedido por el usuario) las únicas medias y recuentos son los del barómetro por segundo (R9) y los de
+  `gnss_status.csv` (R16).
 - **R8 — `gps_fused.csv`.** Una petición de posiciones propia (Fused), mismo intervalo que hoy (1000 ms, mínimo
   500 ms, alta precisión) pero **sin distancia mínima y sin filtros**, recorriendo **todas** las posiciones de
   cada resultado. Columnas:
@@ -56,13 +57,14 @@ no cambia.
   el registro mide lo que el móvil da a una petición propia de 1 s sin distancia mínima, que es como grabará
   TrackCan; en pasivo, con la pantalla apagada no se sabría si un corte es del móvil o de la petición de Tabata.
   Queda en `meta.json` (`observer_effect`).
-- **R9 — `baro.csv`.** Sensor de presión del móvil, ≈ 1 fila por segundo. Si el sensor da más, se escribe una
-  muestra cuando han pasado al menos 950 ms (hora del sensor) desde la última escrita; las demás se descartan
-  sin promediar y su número va a `meta.json`. Columnas:
-  `epoch_ms;elapsed_ns;sensor_ts_ns;pressure_hpa;accuracy`
-  (`sensor_ts_ns` y `accuracy` son la hora y la fiabilidad que da el propio sensor; añadidas porque son datos
-  en bruto que ya vienen con la muestra). Si el móvil no tiene barómetro, no se crea el archivo y queda en
-  `meta.json`.
+- **R9 — `baro.csv`.** Sensor de presión del móvil (pedido cada 200 ms; el S22 Ultra da ~10/s). **Desde T-08
+  (2026-11-28): una fila por segundo con la media de todas las lecturas de ese segundo** (segundo de llegada,
+  por `elapsed_ns`); la fila lleva la hora de la última lectura del segundo. Un segundo sin lecturas no da fila.
+  Columnas: `epoch_ms;elapsed_ns;pressure_hpa;n_samples;min_hpa;max_hpa` (`pressure_hpa` = la media). Sin
+  altitud. `meta.json`: `baro.mode = media_por_segundo`, lecturas recibidas y filas escritas. Si el móvil no tiene
+  barómetro, no se crea el archivo y queda en `meta.json`.
+  *Hasta 1.6.160 se guardaba 1 de cada ~10 lecturas sin promediar, con `sensor_ts_ns` y `accuracy`
+  (`format_version` 1).*
 - **R10 — `events.csv`.** `epoch_ms;elapsed_ns;type;detail`. Tipos:
   - Sesión: `session_start`, `session_pause`, `session_resume`, `session_stop`.
   - Servicio: `service_created` (se guarda con su hora real aunque ocurra antes de empezar la sesión),
@@ -76,19 +78,24 @@ no cambia.
     (`fine=…;coarse=…;background=…`). La app no pide ubicación en segundo plano, así que `background=false`
     es lo esperado; no se añade ese permiso.
   - Fuentes: `source_started` / `source_error` (detalle: archivo y motivo), `write_error`.
+  - Llamadas (T-08): `audio_mode` (detalle `mode=normal|ringtone|in_call|in_communication|…`). Se mira
+    `AudioManager.getMode()` al empezar (`,initial`) y cada 5 s, y se anota solo si cambia. Sin permisos nuevos
+    (`getMode()` no pide ninguno; no se añade `READ_PHONE_STATE`). Una llamada de menos de 5 s puede no verse.
 - **R11 — `battery.csv`.** Cada 60 s (lo mejor posible: sin alarmas ni WakeLock, así que si el móvil duerme
   la fila no sale y eso **es** el dato), en cada encendido/apagado de pantalla, al empezar y al parar. Columnas
   (en inglés por la constitución; equivalencia con lo pedido):
   `epoch_ms;elapsed_ns;level_pct;charge_counter_uah;current_now_ua;temp_dc;status;plugged;screen_on;trigger`
   = nivel_pct, carga_uAh, corriente_uA, temperatura_dC, estado_carga, (enchufe), pantalla_encendida, (motivo).
   Valores tal como los da Android, sin cambiar unidades ni signo (en Samsung la corriente puede venir en
-  otras unidades o signo; se anota en `meta.json`).
+  otras unidades o signo; se anota en `meta.json`). **S22 Ultra (comprobado en T-04 y T-06): `current_now_ua`
+  llega en mA, no en µA** (cuadra con el contador de carga); no se cambia ni el valor ni la columna, se anota en
+  `meta.json` (`battery.current_now_unit_note`).
 - **R12 — `meta.json`.** Se escribe al empezar y se completa al parar: modelo, fabricante y versión de
   Android; versión de la app (`versionName` y `versionCode`); `sessionId`; tipo de actividad; parámetros GPS
   usados (intervalo, mínimo, prioridad, distancia mínima 0) y los de la app (1000/500/1 m) para comparar;
   barómetro (sí/no, nombre, fabricante, rango, resolución, retraso mínimo); hora de inicio y fin; contadores
-  (posiciones recibidas, muestras de barómetro recibidas/escritas/descartadas, filas por archivo, errores);
-  lista de archivos.
+  (posiciones recibidas, lecturas de barómetro recibidas y filas escritas, avisos de satélites recibidos y filas,
+  filas por archivo, errores); lista de archivos (incluye `gnss_status.csv`). `format_version` 2 desde T-08.
 - **R13 — Exportar.** En el detalle de la sesión, si existe su carpeta: la ruta y el tamaño, y un botón
   «Compartir registro bruto» que comprime la carpeta en un `.zip` (en la caché de la app) y lo comparte con el
   `FileProvider` que ya existe. Sin carpeta, no se muestra nada.
@@ -99,6 +106,17 @@ no cambia.
   instantánea por segundo, **una fila por satélite** (`epoch_ms;elapsed_ns;snapshot;svid;constellation;cn0_dbhz;used_in_fix;elevation_deg;azimuth_deg;has_almanac;has_ephemeris`).
   Se cambia la "media de C/N0 y nº de satélites" pedida por los datos por satélite, porque una media ya es un
   cálculo (R7); visibles, usados y media se sacan después de este archivo.
+- **R16 (T-08, pedido por el usuario el 2026-11-28) — `gnss_status.csv`.** Resumen de satélites, adelantado a R15
+  (que sigue igual) para tener ya visibles, usados y C/N0. `LocationManager.registerGnssStatusCallback` (ubicación
+  fina, que la app ya tiene), solo con el interruptor encendido y la sesión en marcha; se quita al parar. Como
+  mucho una fila por segundo (un aviso cuando han pasado ≥ 950 ms desde la última fila; los avisos llegan mientras
+  el GPS del móvil está encendido, que lo enciende la petición Fused de R8). Columnas:
+  `epoch_ms;elapsed_ns;sats_visible;sats_used;cn0_mean_used_dbhz;cn0_max_dbhz;used_gps;used_glonass;used_galileo;used_beidou;used_other`.
+  Android da una entrada **por señal**: en un móvil de doble banda (L1 + L5) el mismo satélite sale dos veces.
+  Los **recuentos son de satélites distintos** (constelación + svid): `sats_visible` = todos los del aviso (sin
+  filtrar, también los de C/N0 0); `sats_used` y `used_*` = los que tienen alguna señal usada; `used_other` =
+  SBAS, QZSS, IRNSS u otros. Las de **C/N0 son por señal**: `cn0_mean_used_dbhz` = media de las señales usadas
+  (vacío si no hay); `cn0_max_dbhz` = la mayor de todas (vacío si no hay satélites). Sin más cálculos.
 
 ## Fuera de alcance (no se toca en esta spec)
 - Filtros y parámetros de `GpsManager`, uso de `lastLocation`, guardado en Room, vueltas, mapa,

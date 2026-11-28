@@ -96,5 +96,8 @@ class RawBatterySource(
         const val PERIOD_MS = 60_000L
         const val PARAMS_DETAIL = "period_ms=$PERIOD_MS;triggers=start,periodic,screen_on,screen_off,stop"
         const val CURRENT_NOTE = "current_now_ua: valor crudo de BatteryManager; en Samsung la unidad y el signo pueden variar"
+
+        /** Comprobado en las pruebas del 24 y 25-11 (T-04 y T-06): cuadra con el contador de carga. */
+        const val CURRENT_UNIT_NOTE = "S22 Ultra (SM-S908B): valor en mA, no en µA; negativo descargando"
     }
 }

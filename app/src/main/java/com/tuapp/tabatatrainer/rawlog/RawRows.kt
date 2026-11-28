@@ -19,6 +19,7 @@ object RawFiles {
     const val GPS_FUSED = "gps_fused.csv"
     const val GPS_GNSS = "gps_gnss.csv"
     const val GNSS_SATS = "gnss_sats.csv"
+    const val GNSS_STATUS = "gnss_status.csv"
     const val BARO = "baro.csv"
     const val EVENTS = "events.csv"
     const val BATTERY = "battery.csv"
@@ -49,6 +50,7 @@ object RawEventType {
     const val APP_FOREGROUND = "app_foreground"
     const val APP_BACKGROUND = "app_background"
     const val LOCATION_AVAILABLE = "location_available"
+    const val AUDIO_MODE = "audio_mode"
     const val PERMISSIONS = "permissions"
     const val SOURCE_STARTED = "source_started"
     const val SOURCE_ERROR = "source_error"
@@ -95,19 +97,23 @@ data class LocationFix(
     }
 }
 
-/** Una muestra del barómetro (`baro.csv`). */
+/**
+ * Una fila de `baro.csv` (tras T-08): un segundo de lecturas del barómetro con su media ([pressureHpa]), cuántas
+ * hubo y la mínima y máxima. Lo calcula [BaroSecondAverager]. Sin altitud.
+ */
 data class BaroSample(
     val stamp: RawStamp,
-    val sensorTsNs: Long,
-    val pressureHpa: Float,
-    val accuracy: Int?
+    val pressureHpa: Double,
+    val nSamples: Int,
+    val minHpa: Float,
+    val maxHpa: Float
 ) : RawRow {
     override fun toRow() = row(
-        num(stamp.epochMs), num(stamp.elapsedNs), num(sensorTsNs), num(pressureHpa), num(accuracy)
+        num(stamp.epochMs), num(stamp.elapsedNs), num(pressureHpa), num(nSamples), num(minHpa), num(maxHpa)
     )
 
     companion object {
-        val HEADER = RawCsvFormat.header("epoch_ms", "elapsed_ns", "sensor_ts_ns", "pressure_hpa", "accuracy")
+        val HEADER = RawCsvFormat.header("epoch_ms", "elapsed_ns", "pressure_hpa", "n_samples", "min_hpa", "max_hpa")
     }
 }
 
@@ -178,5 +184,71 @@ data class GnssSat(
             "epoch_ms", "elapsed_ns", "snapshot", "svid", "constellation", "cn0_dbhz", "used_in_fix",
             "elevation_deg", "azimuth_deg", "has_almanac", "has_ephemeris"
         )
+    }
+}
+
+/**
+ * Una entrada de un `GnssStatus`, solo lo que necesita `gnss_status.csv` (la fuente lo copia de Android). Un móvil
+ * de doble banda (L1 + L5) da **una entrada por señal**: el mismo satélite puede salir dos veces con el mismo
+ * [svid] y [constellation].
+ */
+data class GnssSatInfo(val constellation: Int, val svid: Int, val cn0DbHz: Float, val usedInFix: Boolean)
+
+/**
+ * Una fila de `gnss_status.csv` (spec 008, T-08): resumen de un `GnssStatus`. Solo recuentos y medias.
+ * Los recuentos son de **satélites distintos** (constelación + svid), aunque lleguen en dos bandas:
+ * [satsVisible] = todos los del aviso; [satsUsed] y los usados por constelación = los que tienen alguna señal usada.
+ * Las de C/N0 son **por señal**: [cn0MeanUsedDbHz] = media de las señales usadas (vacío si no hay ninguna);
+ * [cn0MaxDbHz] = la mayor de todas (vacío si no hay satélites).
+ */
+data class GnssStatusRow(
+    val stamp: RawStamp,
+    val satsVisible: Int,
+    val satsUsed: Int,
+    val cn0MeanUsedDbHz: Double?,
+    val cn0MaxDbHz: Float?,
+    val usedGps: Int,
+    val usedGlonass: Int,
+    val usedGalileo: Int,
+    val usedBeidou: Int,
+    val usedOther: Int
+) : RawRow {
+    override fun toRow() = row(
+        num(stamp.epochMs), num(stamp.elapsedNs), num(satsVisible), num(satsUsed), num(cn0MeanUsedDbHz),
+        num(cn0MaxDbHz), num(usedGps), num(usedGlonass), num(usedGalileo), num(usedBeidou), num(usedOther)
+    )
+
+    companion object {
+        val HEADER = RawCsvFormat.header(
+            "epoch_ms", "elapsed_ns", "sats_visible", "sats_used", "cn0_mean_used_dbhz", "cn0_max_dbhz",
+            "used_gps", "used_glonass", "used_galileo", "used_beidou", "used_other"
+        )
+
+        // Valores de `GnssStatus.CONSTELLATION_*` (copiados para no depender de Android en los tests).
+        const val CONSTELLATION_GPS = 1
+        const val CONSTELLATION_GLONASS = 3
+        const val CONSTELLATION_BEIDOU = 5
+        const val CONSTELLATION_GALILEO = 6
+
+        fun from(stamp: RawStamp, sats: List<GnssSatInfo>): GnssStatusRow {
+            val used = sats.filter { it.usedInFix }
+            // Satélite = constelación + svid (las dos bandas del mismo satélite cuentan una vez).
+            val usedSats = used.map { it.constellation to it.svid }.toSet()
+            fun usedOf(c: Int) = usedSats.count { it.first == c }
+            val known = setOf(CONSTELLATION_GPS, CONSTELLATION_GLONASS, CONSTELLATION_GALILEO, CONSTELLATION_BEIDOU)
+            return GnssStatusRow(
+                stamp = stamp,
+                satsVisible = sats.map { it.constellation to it.svid }.toSet().size,
+                satsUsed = usedSats.size,
+                // Con el texto del Float para no arrastrar decimales falsos (38.7f → 38.7, no 38.70000076).
+                cn0MeanUsedDbHz = if (used.isEmpty()) null else used.sumOf { it.cn0DbHz.toString().toDouble() } / used.size,
+                cn0MaxDbHz = sats.maxOfOrNull { it.cn0DbHz },
+                usedGps = usedOf(CONSTELLATION_GPS),
+                usedGlonass = usedOf(CONSTELLATION_GLONASS),
+                usedGalileo = usedOf(CONSTELLATION_GALILEO),
+                usedBeidou = usedOf(CONSTELLATION_BEIDOU),
+                usedOther = usedSats.count { it.first !in known }
+            )
+        }
     }
 }

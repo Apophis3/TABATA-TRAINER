@@ -6,6 +6,51 @@ memoria privada de Claude. **Lo más reciente arriba.**
 
 ---
 
+## 2026-11-28 — Spec 008 · T-08 Satélites, barómetro por segundo, llamadas (código hecho, sin compilar)
+- Pedido por el usuario para una salida andando de 2 h; plan en `tasks.md` T-08, aprobado en el mismo mensaje.
+  En 1.6.158–1.6.160 no estaban satélites, barómetro por segundo ni llamadas; la nota de mA solo estaba en
+  `tasks.md` (T-04) y la lista de archivos de `meta.json` ya salía sola.
+- `gnss_status.csv` (`RawGnssStatusRecorder/Source`, R16), `baro.csv` una fila por segundo con media, n, mín. y
+  máx. (`BaroSecondAverager`; `BaroDecimator` renombrado a `MinGapGate`), `audio_mode` en `events.csv`
+  (`AudioModeWatcher`, `getMode()` cada 5 s, sin permisos), `meta.json` `format_version` 2 con
+  `current_now_unit_note` (S22 Ultra: mA).
+- `gnss_status.csv`: recuentos de satélites distintos (constelación + svid, el S22 da L1 y L5), C/N0 por señal.
+- Tests +14 → suite esperada **346** (332 + 14, si la base estaba en verde). APK esperada 1.6.161.
+- Pendiente: el usuario compila, `./gradlew test`, salida de 2 h y el zip.
+
+## 2026-11-25 — Spec 007 · Arreglos tras la prueba (BLE código hecho, sin compilar; ANT+ pendiente)
+- T-06 de la spec 008 en pausa a petición del usuario: en la prueba 1 ANT+ se cayó y el BLE no volvió al encender
+  el Bluetooth. Diagnóstico y diseño en `specs/007-dual-signal-devices/plan.md` §15 (R12 BLE, R13 ANT+).
+- **Causa BLE** (`dumpsys bluetooth_manager`): al apagar, el sistema da de baja la conexión de la app sin avisar
+  «desconectado»; la banda se queda en `gatts` y el escaneo descarta sus anuncios (1138 tras encender). Además
+  `ensureBle` soltaba el escaneo sin pararlo (Samsung deja la radio en modo solo BLE) → 4 escaneos vivos.
+- **Causa ANT+** (logcat): Freecess congela las apps de ANT entre búsquedas; la búsqueda se repetía cada 15 s con
+  HR1 ya enganchado → fallos USB, huecos de 6–10 s y al final `ADAPTER_NOT_DETECTED` sin fin cada 15 s.
+- **Hecho (A, BLE):** `BleLinkWatch` (+5 tests → suite esperada **332**); en `HeartRateHub` y `CadenceHub`:
+  receptor de encendido/apagado del Bluetooth, escáner guardado y parado con él (nunca dos), escaneos viejos sin
+  efecto, sin conectar con el Bluetooth apagado y conexión muda cerrada a los 20 s (pulso) / 30 s (cadencia).
+- Pendiente: el usuario compila, prueba A (guion en el chat); luego B (ANT+) y su ajuste de batería de las apps
+  de ANT; después retomar T-06.
+- **Error del agente:** durante el diagnóstico ejecutó `adb logcat -c` y vació el búfer del móvil. El logcat de
+  la prueba ya estaba guardado junto al zip; no se perdió nada, pero no debe repetirse.
+
+## 2026-11-24 — Spec 008 · T-06 Prueba de campo (guion entregado, pendiente del usuario)
+- Sin cambios de código. Estado del móvil leído por adb: 1.6.157, «Registro bruto» apagado, batería de la app en
+  «Optimizado» (no está en la lista blanca de Doze → `ignoring_battery_optimizations=false`), 31 % y por USB.
+- Reparto: **Paseo** con «Optimizado» (`false`) y **Salida** con «No restringido» (`true`), cambiado a mano en
+  Ajustes → Aplicaciones → Tabata Trainer S. CELIS → Batería. Ojo: andar y rodar no son iguales (Doze depende del
+  movimiento), así que la comparación entre las dos no es pura.
+- Logcat: el búfer principal del móvil (5 MiB) solo guarda ~20 min; una salida de 40 min no cabe entera.
+- Zips a `H:\PROTON DRIVE\My files\Tabata trainer\Track\Reg Bruto`; el agente saca además la carpeta por `run-as`.
+- 2026-11-25 Prueba 1 (Paseo, sesión 7701dccb): todo bien salvo que la pantalla apagada fue 17,8 min seguidos, no
+  30 (detalle en `tasks.md`). Zip y Logcat en `H:\MisProyectos\PROYECT_TRACK_GPS\19_fases\gpx_referencia\Reg bruto`.
+- Pulsómetro (fuera de T-06): pulso hasta 12:01:03 y luego nada; antes, cortes de 6–10 s cada 15 s. Logcat (solo
+  desde 12:14): ANT+ USB `ADAPTER_NOT_DETECTED`, el servicio ANT de Dynastream se cae a las 12:20 y el Bluetooth se
+  encendió a las 12:15:35 (estaba apagado). La causa del corte de las 12:01 no queda en el Logcat.
+- 2026-11-25 Prueba 2 (Paseo, «No restringido», 1.6.160, sesión 4d99e1f7): 34,6 min seguidos de pantalla
+  apagada, sin huecos en GPS, barómetro ni batería; solo Doze ligero, igual que la prueba 1. Pulso completo.
+  Zip, Logcat y Garmin (`ruta 2 garmin`) en la misma carpeta. Faltan las dos pruebas quietas en la terraza (60 min).
+
 ## 2026-11-24 — Spec 008 · T-05 Exportar (hecha, 327/327)
 - Detalle de sesión: tarjeta «Registro bruto» (ruta, tamaño, «Compartir registro bruto») solo si existe la
   carpeta; el zip `rawlog_<id>.zip` se crea en la caché tras borrar los viejos y se comparte por el `FileProvider`.

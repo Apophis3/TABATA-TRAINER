@@ -60,5 +60,58 @@ Gradle ni `adb install` (Clave 5). **Ninguna tarea empieza hasta que el usuario 
   pantalla apagada se hace **dos veces**: sin excluir la app del ahorro de batería y excluyéndola a mano en
   Ajustes; `events.csv` debe traer `ignoring_battery_optimizations` al empezar en las dos.
   Evidencia: zip de la sesión y Logcat; el agente analiza los CSV y lo resume.
+  Prueba 1 — Paseo, «Optimizado» (1.6.157, sesión 7701dccb, 25-11 11:38–12:17, 39,2 min, 0 errores):
+  `ignoring_battery_optimizations=false,initial` (bien). Pantalla apagada 23,8 min en tres tramos (5,2 + 0,8 +
+  **17,8** min): no llegó a 30 min seguidos (los encendidos de 11:49–11:55 fueron una llamada de teléfono). Solo Doze ligero (entra ~2,3 min tras apagar, ventanas de 5 s cada
+  ~13 min), nunca profundo. `gps_fused` 4167 filas (1,77/s, mediana 0,5 s; Fused da al mínimo de 500 ms), ningún
+  hueco > 1,5 s ni con pantalla apagada, lotes siempre 1, retraso de recepción mediana 25–28 ms, `h_acc` mediana
+  3,5–4,1 m (A1 bien). `baro` 2348 filas, máx. 1,03 s entre filas en los dos estados (A3 bien). `battery` 47 filas,
+  `periodic` cada 60,0 s también apagada, sin huecos; 69 → 62 % (322 mAh; ~336 mA apagada, ~565 mA encendida).
+  Room 2602 puntos, 66/min (A5 bien: por debajo de las 72/min sin interruptor de T-03). Zip leído (A6 bien).
+  Logcat: el búfer solo llegó a 12:14–12:30 (guardado junto al zip). Desnivel+ de la app 127 m frente a ~14 m de
+  rango del barómetro (para la spec 009).
+  Añadido (2026-11-25, acordado con el usuario): la prueba 1 vale como «en marcha, Optimizado». Orden: prueba 2
+  (Salida, «No restringido», 30 min seguidos de pantalla apagada) y después **dos pruebas quietas de 60 min en la
+  terraza a cielo abierto** (una «Optimizado» y otra «No restringido»), porque el Doze profundo solo entra con el
+  móvil quieto (~35 min) y en marcha no aparece. Durante las pruebas, «No molestar» para que ninguna llamada encienda
+  la pantalla.
+  En pausa (2026-11-25): en la prueba 1 ANT+ se cayó y el BLE no volvió tras encender el Bluetooth. La prueba 2 espera a
+  los arreglos de la spec 007 (R12 BLE, R13 ANT+, `plan.md` §15). Reanudada el mismo día con 1.6.160 (arreglo A de BLE).
+  Prueba 2 — Paseo, «No restringido» (1.6.160, sesión 4d99e1f7, 25-11 13:15–13:57, 42,7 min, 0 errores):
+  `ignoring_battery_optimizations=true,initial` (bien); sin cable y «No molestar» sin llamadas. Fue andando
+  (mediana 1,41 m/s), así que se compara bien con la prueba 1. Pantalla apagada **34,6 min seguidos** (13:20–13:54,
+  A2 bien). Solo Doze ligero (entra 66 s tras apagar), nunca profundo, igual que en la prueba 1. `gps_fused` 4881
+  filas (1,9/s), ningún hueco > 1,5 s ni con pantalla apagada (máx. 1,5 s), lotes siempre 1, retraso de recepción
+  mediana 29–32 ms, `h_acc` mediana 3,3–3,7 m, máx. 13,6 m (A1 bien). `baro` 2557 filas, máx. 1,06 s (A3 bien).
+  `battery` 48 filas, `periodic` cada 60,0 s sin huecos; 69 → 62 % (300 mAh; ~378 mA apagada, ~590 mA encendida).
+  Room 2724 puntos, 64/min (A5 bien); sus huecos mayores (5–6 s) son con velocidad 0, parado. Zip leído (A6 bien).
+  Logcat guardado junto al zip, pero solo cubre 13:40–14:05; nada de la app salvo los avisos `AppOps attributionTag`
+  del sistema. Pulso completo (2541 lecturas, media 93, máx. 123; Garmin 95/123).
+  Garmin: 3,81 km y ascenso 54 m; la app 3,86 km y desnivel+ 104 m; el barómetro tiene ~14 m de rango y el Garmin
+  13,6 m (para la spec 009).
+  **En marcha, excluir la app del ahorro no cambia nada:** en las dos pruebas solo hay Doze ligero y ningún hueco.
+  Faltan las dos pruebas quietas en la terraza.
 - [ ] T-07 *(fase 2)* **GNSS puro.** `gps_gnss.csv` (`LocationManager` GPS) y `gnss_sats.csv` (un satélite por
   fila, una instantánea por segundo). Evidencia: salida de 10 min y comparación Fused vs GPS solo.
+- [ ] T-08 **Ampliación pequeña: satélites, barómetro por segundo, llamadas y nota de corriente** *(pedida por el
+  usuario el 2026-11-28 para una salida andando de 2 h; plan aprobado por él en el mismo mensaje; va antes que T-07)*.
+  Plan:
+  1. `gnss_status.csv` (`RawGnssStatusRecorder` sin Android + `RawGnssStatusSource` con
+     `LocationManager.registerGnssStatusCallback`, hilo «RawLog»): como mucho una fila por segundo (margen 950 ms,
+     `MinGapGate`); columnas `epoch_ms;elapsed_ns;sats_visible;sats_used;cn0_mean_used_dbhz;cn0_max_dbhz;used_gps;
+     used_glonass;used_galileo;used_beidou;used_other`. Recuentos por satélite (constelación + svid; las dos
+     bandas cuentan una vez), C/N0 por señal. Se registra y se quita igual que Fused.
+  2. `baro.csv`: `BaroSecondAverager` sustituye a `BaroDecimator` (que pasa a ser `MinGapGate`, genérico). Una
+     fila por segundo (segundo de llegada) con la media de sus lecturas; columnas
+     `epoch_ms;elapsed_ns;pressure_hpa;n_samples;min_hpa;max_hpa`. Segundo sin lecturas = sin fila. Sin altitud.
+  3. `events.csv`: `audio_mode` (`AudioModeWatcher`): `AudioManager.getMode()` cada 5 s; fila al empezar
+     (`,initial`) y solo cuando cambia. Sin permisos nuevos (no hace falta `READ_PHONE_STATE`).
+  4. `meta.json` `format_version` 2: bloque `gnss_status`, `baro.mode = media_por_segundo`, `audio_mode` y
+     `battery.current_now_unit_note` (S22 Ultra: mA). La lista `files` ya sale de los archivos abiertos.
+  5. Sin tocar `GpsManager`, Room, `NavGraph` ni el ciclo de vida de los servicios; sin dependencias. Con el
+     interruptor apagado no se crea nada (igual que antes).
+  Tests: `GnssStatusRowTest`, `BaroSecondAveragerTest` (0, 1 y varias lecturas), `AudioModeWatcherTest`;
+  `RawBaroRecorderTest`, `RawRowsTest` y `MinGapGateTest` adaptados. Versión: la APK sale como 1.6.161 (BUILD sube
+  solo al compilar).
+  Evidencia: `./gradlew test` en verde y el zip de la salida: `gnss_status.csv` nuevo con filas; `baro.csv`,
+  `events.csv` y `meta.json` cambiados; `gps_fused.csv` y `battery.csv` igual.

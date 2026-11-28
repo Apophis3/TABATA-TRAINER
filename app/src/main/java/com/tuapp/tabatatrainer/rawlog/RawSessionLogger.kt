@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
@@ -48,6 +49,9 @@ class RawSessionLogger @Inject constructor(
         var baroRecorder: RawBaroRecorder? = null
         var battery: RawBatterySource? = null
         var batteryRecorder: RawBatteryRecorder? = null
+        var gnss: RawGnssStatusSource? = null
+        var gnssRecorder: RawGnssStatusRecorder? = null
+        var audioWatcher: AudioModeWatcher? = null
     }
 
     private val lock = Any()
@@ -174,6 +178,7 @@ class RawSessionLogger @Inject constructor(
         writeMeta(s)
         s.handler.postDelayed(object : Runnable {
             override fun run() {
+                safely("baro.tick") { s.baroRecorder?.tick(now()) }
                 safely("flush") { s.core.flushIfDue() }
                 if (s.core.isOpen) s.handler.postDelayed(this, FLUSH_TICK_MS)
             }
@@ -195,9 +200,13 @@ class RawSessionLogger @Inject constructor(
                         " errores=${s.core.writeErrors}" +
                         (s.fusedRecorder?.let { " fused=${it.resultsReceived}r/${it.locationsReceived}p" } ?: "") +
                         (s.baroRecorder?.let { r ->
-                            val d = r.decimator
-                            " baro=${d.written}/${d.received}" + (r.lastError?.let { e -> "($e)" } ?: "")
+                            val a = r.averager
+                            " baro=${a.rows}s/${a.received}m" + (r.lastError?.let { e -> "($e)" } ?: "")
                         } ?: "") +
+                        (s.gnssRecorder?.let { r ->
+                            " gnss=${r.gate.written}/${r.gate.received}" + (r.lastError?.let { e -> "($e)" } ?: "")
+                        } ?: "") +
+                        (s.audioWatcher?.let { " audio_mode=${it.changes}" } ?: "") +
                         (s.batteryRecorder?.let { " bateria=${it.rowsByTrigger}" } ?: "")
                 )
             }
@@ -216,6 +225,13 @@ class RawSessionLogger @Inject constructor(
         s.fused = fused
         safely("fused.start") { fused.start() }
 
+        // T-08: satélites (después de Fused, que es quien enciende el GPS del móvil).
+        val gnssRecorder = RawGnssStatusRecorder(s.core)
+        val gnss = RawGnssStatusSource(context, s.handler, gnssRecorder, ::now)
+        s.gnssRecorder = gnssRecorder
+        s.gnss = gnss
+        safely("gnss.start") { gnss.start() }
+
         val baroRecorder = RawBaroRecorder(s.core)
         val baro = RawBaroSource(context, s.handler, baroRecorder, ::now)
         s.baroRecorder = baroRecorder
@@ -227,6 +243,30 @@ class RawSessionLogger @Inject constructor(
         s.batteryRecorder = batteryRecorder
         s.battery = battery
         safely("battery.start") { battery.start() }
+
+        startAudioModePolling(s)
+    }
+
+    /**
+     * T-08: estado de llamada sin permisos. Mira `AudioManager.getMode()` al empezar y cada 5 s en el hilo «RawLog»;
+     * anota `audio_mode` solo cuando cambia ([AudioModeWatcher]). Se para solo al cerrar la sesión (el cierre quita
+     * todo lo pendiente del hilo).
+     */
+    private fun startAudioModePolling(s: Active) {
+        val am = context.getSystemService(AudioManager::class.java) ?: return
+        val watcher = AudioModeWatcher()
+        s.audioWatcher = watcher
+        val poll = object : Runnable {
+            override fun run() {
+                if (!s.core.isOpen) return
+                safely("audio_mode") {
+                    val stamp = now()
+                    watcher.observe(am.mode)?.let { s.core.event(stamp, RawEventType.AUDIO_MODE, it) }
+                }
+                s.handler.postDelayed(this, AudioModeWatcher.POLL_MS)
+            }
+        }
+        poll.run()
     }
 
     /**
@@ -239,9 +279,15 @@ class RawSessionLogger @Inject constructor(
             safely("fused.stop") { source.stop() }
             Log.i(TAG, "Fused: petición quitada (sesión ${s.core.sessionId})")
         }
+        s.gnss?.let { source ->
+            s.gnss = null
+            safely("gnss.stop") { source.stop() }
+        }
         s.baro?.let { source ->
             s.baro = null
             safely("baro.stop") { source.stop() }
+            // El último segundo, antes de que se cierre el archivo.
+            safely("baro.flushPending") { s.baroRecorder?.flushPending() }
         }
         s.battery?.let { source ->
             s.battery = null
@@ -356,7 +402,8 @@ class RawSessionLogger @Inject constructor(
         val target = File(core.dir, RawFiles.META)
         try {
             val json = JSONObject().apply {
-                put("format_version", 1)
+                // 2 desde T-08: baro.csv por segundo con media, gnss_status.csv y audio_mode.
+                put("format_version", 2)
                 put("device", JSONObject().apply {
                     put("manufacturer", Build.MANUFACTURER)
                     put("model", Build.MODEL)
@@ -420,11 +467,11 @@ class RawSessionLogger @Inject constructor(
                         }
                         put("requested_sampling_period_us", RawBaroSource.SAMPLING_PERIOD_US)
                         put("max_report_latency_us", RawBaroSource.MAX_REPORT_LATENCY_US)
-                        put("min_gap_ms", BaroDecimator.DEFAULT_MIN_GAP_NS / 1_000_000)
+                        put("mode", BaroSecondAverager.MODE)
+                        put("mode_note", "una fila por segundo de llegada: media, n_samples, min y max; sin altitud")
                         put("started", r.started)
-                        put("samples_received", r.decimator.received)
-                        put("samples_written", r.decimator.written)
-                        put("samples_discarded", r.decimator.discarded)
+                        put("samples_received", r.averager.received)
+                        put("rows_written", r.averager.rows)
                         put("error", r.lastError ?: JSONObject.NULL)
                     })
                 }
@@ -434,6 +481,31 @@ class RawSessionLogger @Inject constructor(
                         put("started", r.started)
                         put("rows_by_trigger", JSONObject().apply { r.rowsByTrigger.forEach { (k, v) -> put(k, v) } })
                         put("note", RawBatterySource.CURRENT_NOTE)
+                        put("current_now_unit_note", RawBatterySource.CURRENT_UNIT_NOTE)
+                    })
+                }
+                s.gnssRecorder?.let { r ->
+                    put("gnss_status", JSONObject().apply {
+                        put("file", RawFiles.GNSS_STATUS)
+                        put("min_gap_ms", RawGnssStatusSource.MIN_GAP_MS)
+                        put("started", r.started)
+                        put("callbacks_received", r.gate.received)
+                        put("rows_written", r.gate.written)
+                        put("error", r.lastError ?: JSONObject.NULL)
+                        put(
+                            "note",
+                            "recuentos de satélites distintos (constelación+svid, las dos bandas cuentan una vez): " +
+                                "sats_visible = todos los del aviso, sats_used y used_* = con alguna señal usada " +
+                                "(otros = SBAS, QZSS, IRNSS…); C/N0 por señal: cn0_mean_used = media de las señales " +
+                                "usadas, cn0_max = la mayor de todas"
+                        )
+                    })
+                }
+                s.audioWatcher?.let { w ->
+                    put("audio_mode", JSONObject().apply {
+                        put("poll_ms", AudioModeWatcher.POLL_MS)
+                        put("events", w.changes)
+                        put("note", "AudioManager.getMode() sin permisos; evento audio_mode en events.csv solo si cambia")
                     })
                 }
                 put("files", JSONObject().apply {

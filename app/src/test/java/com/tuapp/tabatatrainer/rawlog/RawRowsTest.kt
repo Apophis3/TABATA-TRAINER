@@ -48,11 +48,11 @@ class RawRowsTest {
     }
 
     @Test
-    fun baro_row() {
-        val s = BaroSample(stamp, sensorTsNs = 987_600_000_000L, pressureHpa = 941.37f, accuracy = 3)
-        assertEquals("1790000000123;987654321000;987600000000;941.37;3", s.toRow())
-        assertEquals("epoch_ms;elapsed_ns;sensor_ts_ns;pressure_hpa;accuracy", BaroSample.HEADER)
-        assertEquals(columns(BaroSample.HEADER), columns(s.copy(accuracy = null).toRow()))
+    fun baro_row_is_one_second_with_mean_count_min_and_max() {
+        val s = BaroSample(stamp, pressureHpa = 941.37, nSamples = 10, minHpa = 941.3f, maxHpa = 941.45f)
+        assertEquals("1790000000123;987654321000;941.37;10;941.3;941.45", s.toRow())
+        assertEquals("epoch_ms;elapsed_ns;pressure_hpa;n_samples;min_hpa;max_hpa", BaroSample.HEADER)
+        assertEquals(columns(BaroSample.HEADER), columns(s.toRow()))
     }
 
     @Test
@@ -95,7 +95,10 @@ class RawRowsTest {
 
     @Test
     fun every_header_starts_with_epoch_and_elapsed() {
-        listOf(LocationFix.HEADER, BaroSample.HEADER, BatterySample.HEADER, RawEvent.HEADER, GnssSat.HEADER)
+        listOf(
+            LocationFix.HEADER, BaroSample.HEADER, BatterySample.HEADER, RawEvent.HEADER, GnssSat.HEADER,
+            GnssStatusRow.HEADER
+        )
             .forEach { assertTrue(it, it.startsWith("epoch_ms;elapsed_ns;")) }
     }
 }

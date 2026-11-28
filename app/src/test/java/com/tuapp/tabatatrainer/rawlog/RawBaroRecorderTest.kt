@@ -50,33 +50,36 @@ class RawBaroRecorderTest {
     }
 
     @Test
-    fun samples_every_200_ms_for_10_s_give_about_one_row_per_second() {
+    fun samples_every_200_ms_for_10_s_give_one_averaged_row_per_second() {
         val c = openCore()
         val r = RawBaroRecorder(c)
         r.started(stamp(), info, "p")
-        for (i in 0 until 50) r.onSample(stamp(), 9_000_000_000L + i * 200_000_000L, 1013.25f, 3)
+        for (i in 0 until 50) r.onSample(stamp(9_000L + i * 200), if (i % 2 == 0) 1013.0f else 1013.5f)
+        r.flushPending()
         c.stop(stamp(), SERVICE, RawSessionCore.STOP_USER)
 
         val rows = lines(baroFile(c))
         assertEquals(10, rows.size)
-        assertEquals(50L, r.decimator.received)
-        assertEquals(10L, r.decimator.written)
-        assertEquals(40L, r.decimator.discarded)
-        val cols = rows.first().split(";")
-        assertEquals("9000000000", cols[2])
-        assertEquals("1013.25", cols[3])
-        assertEquals("3", cols[4])
+        assertEquals(50L, r.averager.received)
+        assertEquals(10L, r.averager.rows)
+        // Segundo 9: lecturas a 9000, 9200 … 9800 ms (1013.0, 1013.5, 1013.0, 1013.5, 1013.0).
+        assertEquals(listOf("1700000009800", "9800000000", "1013.2", "5", "1013.0", "1013.5"), rows.first().split(";"))
     }
 
     @Test
-    fun missing_accuracy_stays_empty() {
+    fun the_open_second_is_written_by_the_tick_once_it_is_over() {
         val c = openCore()
         val r = RawBaroRecorder(c)
         r.started(stamp(), info, "p")
-        r.onSample(stamp(), 1L, 1000f, null)
+        r.onSample(stamp(5_100), 1000f)
+        r.tick(stamp(5_900))
+        assertEquals(0L, r.averager.rows)
+        r.tick(stamp(6_000))
+        assertEquals(1L, r.averager.rows)
         c.stop(stamp(), SERVICE, RawSessionCore.STOP_USER)
 
-        assertEquals("", lines(baroFile(c)).single().split(";")[4])
+        assertEquals(listOf("1700000005100", "5100000000", "1000.0", "1", "1000.0", "1000.0"),
+            lines(baroFile(c)).single().split(";"))
     }
 
     @Test
@@ -109,15 +112,17 @@ class RawBaroRecorderTest {
     fun samples_before_start_or_after_stop_are_ignored() {
         val c = openCore()
         val r = RawBaroRecorder(c)
-        r.onSample(stamp(), 1L, 1000f, 3)
-        assertEquals(0L, r.decimator.received)
+        r.onSample(stamp(1_000), 1000f)
+        assertEquals(0L, r.averager.received)
 
         r.started(stamp(), info, "p")
-        r.onSample(stamp(), 2_000_000_000L, 1000f, 3)
+        r.onSample(stamp(2_000), 1000f)
+        r.flushPending()
         c.stop(stamp(), SERVICE, RawSessionCore.STOP_USER)
-        r.onSample(stamp(), 4_000_000_000L, 1000f, 3)
+        r.onSample(stamp(4_000), 1000f)
+        r.flushPending()
 
-        assertEquals(1L, r.decimator.received)
+        assertEquals(1L, r.averager.received)
         assertEquals(1, lines(baroFile(c)).size)
     }
 
@@ -126,7 +131,8 @@ class RawBaroRecorderTest {
         val c = openCore()
         val r = RawBaroRecorder(c)
         r.started(stamp(), info, "p")
-        r.onSample(stamp(), 1L, 1000f, 3)
+        r.onSample(stamp(1_000), 1000f)
+        r.flushPending()
 
         assertTrue(lines(baroFile(c)).isEmpty())
         nowMs += RawFileWriter.DEFAULT_FLUSH_INTERVAL_MS

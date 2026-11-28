@@ -1,14 +1,15 @@
 package com.tuapp.tabatatrainer.rawlog
 
 /**
- * Decide qué muestras del barómetro se escriben (spec 008, R9): una cuando han pasado al menos
- * [minGapNs] (hora del sensor) desde la última escrita. Las demás se descartan sin promediar y se cuentan.
+ * Deja pasar un dato cuando han pasado al menos [minGapNs] desde el último que dejó pasar; los demás se cuentan
+ * como descartados. Lo usa `gnss_status.csv` (spec 008, T-08) para escribir como mucho una fila por segundo.
+ * Antes se llamaba `BaroDecimator` y decidía qué muestras del barómetro se escribían (hasta T-08).
  *
- * El margen por defecto (950 ms en vez de 1000) evita perder muestras de un sensor de 1 Hz que llegan
- * con pequeños retrasos. Si la hora del sensor va hacia atrás (reinicio del sensor), la muestra se
- * escribe y se toma como nueva referencia.
+ * El margen por defecto (950 ms en vez de 1000) evita perder datos de una fuente de 1 Hz que llegan con
+ * pequeños retrasos. Si la hora va hacia atrás (reinicio de la fuente), el dato pasa y se toma como nueva
+ * referencia.
  */
-class BaroDecimator(private val minGapNs: Long = DEFAULT_MIN_GAP_NS) {
+class MinGapGate(private val minGapNs: Long = DEFAULT_MIN_GAP_NS) {
 
     private var lastWrittenNs: Long? = null
 
@@ -18,14 +19,14 @@ class BaroDecimator(private val minGapNs: Long = DEFAULT_MIN_GAP_NS) {
         private set
     val discarded: Long get() = received - written
 
-    /** @return `true` si la muestra con hora de sensor [sensorTsNs] debe escribirse. */
-    fun accept(sensorTsNs: Long): Boolean {
+    /** @return `true` si el dato con hora [tsNs] debe escribirse. */
+    fun accept(tsNs: Long): Boolean {
         received++
         val last = lastWrittenNs
-        val gap = if (last == null) null else sensorTsNs - last
+        val gap = if (last == null) null else tsNs - last
         val keep = gap == null || gap >= minGapNs || gap < 0
         if (keep) {
-            lastWrittenNs = sensorTsNs
+            lastWrittenNs = tsNs
             written++
         }
         return keep

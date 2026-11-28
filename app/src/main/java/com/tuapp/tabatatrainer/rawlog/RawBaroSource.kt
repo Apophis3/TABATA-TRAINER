@@ -10,7 +10,7 @@ import android.os.Handler
 /**
  * Barómetro del móvil para `baro.csv` (spec 008, R9; plan §5). Usa `android.hardware.SensorManager`, **no** el
  * `SensorManager` de la app. Ritmo pedido 200 ms y sin lotes (latencia 0), con las muestras en el hilo «RawLog»
- * ([handler]). Qué se escribe lo decide [RawBaroRecorder].
+ * ([handler]). La media por segundo la hace [RawBaroRecorder].
  *
  * Solo la crea [RawSessionLogger] al abrir una sesión con el interruptor encendido (R2).
  */
@@ -25,11 +25,11 @@ class RawBaroSource(
 
     private val listener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent) {
-            recorder.onSample(clock(), event.timestamp, event.values[0], event.accuracy)
+            recorder.onSample(clock(), event.values[0])
         }
 
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
-            // La fiabilidad va en cada fila (`accuracy`); aquí no se anota nada más.
+            // Desde T-08 baro.csv lleva la media por segundo, sin la fiabilidad del sensor.
         }
     }
 
@@ -79,6 +79,6 @@ class RawBaroSource(
         const val MAX_REPORT_LATENCY_US = 0
 
         const val PARAMS_DETAIL = "sampling_period_us=$SAMPLING_PERIOD_US;max_report_latency_us=$MAX_REPORT_LATENCY_US" +
-            ";min_gap_ms=${BaroDecimator.DEFAULT_MIN_GAP_NS / 1_000_000}"
+            ";mode=${BaroSecondAverager.MODE}"
     }
 }

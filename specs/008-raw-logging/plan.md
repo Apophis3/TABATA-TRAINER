@@ -251,3 +251,14 @@ Con los datos de esta spec, probablemente convenga en `GpsManager`:
   su propia velocidad en 1,0–1,4 m/s y la precisión empeorando de 5 a 8 m); la app lo suma a la distancia y el
   ritmo de 10 s sale a ~2:00. También en f04787cd (11–16 s, ~60 m). La sesión total sale ~15 % larga.
   Propuesta: no sumar un tramo cuya velocidad implícita supere con mucho la que da el GPS (o la precisión).
+
+## 12. T-08 — satélites, barómetro por segundo y llamadas (2026-11-28, aprobado por el usuario)
+- `gnss_status.csv`: `RawGnssStatusSource` registra `GnssStatus.Callback` (API 30+: con `Executor` que pasa al hilo
+  «RawLog»; antes, con su `Handler`) justo después de Fused; `RawGnssStatusRecorder` escribe con `MinGapGate`
+  (950 ms, el antiguo `BaroDecimator`) y `GnssStatusRow.from` hace los recuentos. Se quita en `stopSources`.
+- `baro.csv`: `BaroSecondAverager` agrupa por segundo de `elapsed_ns`; el segundo se cierra al llegar una lectura
+  de otro segundo, en el temporizador de 1 s (`tick`) o al parar (`flushPending`, antes de cerrar los archivos).
+- `audio_mode`: un `Runnable` en el hilo «RawLog» mira `AudioManager.getMode()` al abrir y cada 5 s; se para con
+  `removeCallbacksAndMessages` al cerrar, como el resto.
+- Impacto (Clave 3): ninguno en servicios, `NavGraph`, Room ni `GpsManager`; todo vive en `RawSessionLogger`, que
+  solo existe con el interruptor encendido. Sin permisos ni dependencias nuevas. `meta.json` `format_version` 2.
