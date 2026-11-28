@@ -34,6 +34,7 @@ import com.tuapp.tabatatrainer.util.laps.LapBook
 import com.tuapp.tabatatrainer.util.laps.LapRecord
 import com.tuapp.tabatatrainer.util.laps.LapType
 import com.tuapp.tabatatrainer.util.laps.PaceCalculator
+import com.tuapp.tabatatrainer.util.map.RouteSimplifier
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -153,6 +154,14 @@ data class MapPoint(
     val timestamp: Long = System.currentTimeMillis()
 )
 
+// Spec 009, R3: vuelta manual guardada (para el aviso y el marcador del mapa en vivo).
+// latitude/longitude = null si aún no había posición GPS al marcarla.
+data class LapMark(
+    val number: Int,
+    val latitude: Double?,
+    val longitude: Double?
+)
+
 // ============================================================================
 // FREE RIDE SERVICE - CON SOPORTE PARA MAPA EN TIEMPO REAL
 // ============================================================================
@@ -164,7 +173,7 @@ class FreeRideService : Service() {
         private const val TAG = "FreeRideService"
         private const val NOTIFICATION_ID = 2001
         private const val CHANNEL_ID = "freeride_channel"
-        private const val MAX_MAP_POINTS = 1000  // Máximo puntos para el mapa en memoria
+        private const val LAP_VIBRATION_MS = 80L  // spec 009, RF-3.1
         private const val HR_STALE_MS = 5_000L   // un pulso más viejo no se graba (spec 007, R2.1)
     }
 
@@ -193,6 +202,16 @@ class FreeRideService : Service() {
     // ⚡ NUEVO: Puntos GPS para el mapa en tiempo real
     private val _mapPoints = MutableStateFlow<List<MapPoint>>(emptyList())
     val mapPoints: StateFlow<List<MapPoint>> = _mapPoints.asStateFlow()
+
+    // Spec 009, R1: ruta entera aligerada para el mapa en vivo (sin tope de puntos).
+    // Lo que se guarda (Room, registro bruto) no pasa por aquí. Acceso siempre con synchronized.
+    private val routeSimplifier = RouteSimplifier<MapPoint>({ it.latitude }, { it.longitude })
+
+    // Spec 009, R3: vueltas manuales guardadas en esta sesión (marcadores del mapa) y aviso puntual
+    private val _lapMarks = MutableStateFlow<List<LapMark>>(emptyList())
+    val lapMarks: StateFlow<List<LapMark>> = _lapMarks.asStateFlow()
+    private val _lapEvents = MutableSharedFlow<LapMark>(extraBufferCapacity = 4)
+    val lapEvents: SharedFlow<LapMark> = _lapEvents.asSharedFlow()
 
     // Aviso de km completado (R3): la UI muestra el banner; sonido y vibración los dispara el
     // servicio para que suenen también con la pantalla apagada
@@ -569,7 +588,7 @@ class FreeRideService : Service() {
         paceCalculator.reset()
         gpsPointsBuffer.clear()
         _laps.update { emptyList() }
-        _mapPoints.update { emptyList() }  // ⚡ Limpiar puntos del mapa
+        clearLiveMap()
         resetLapCounters()
         resetAutoLapCounters()
         lapBook.reset(System.currentTimeMillis())
@@ -723,6 +742,7 @@ class FreeRideService : Service() {
             )
         }
         updateCurrentLapBlock()
+        confirmManualLap(record.typeNumber, currentStats.latitude, currentStats.longitude)
 
         Log.d(TAG, "🏁 LAP MANUAL ${record.typeNumber}: ${String.format("%.2f", record.distanceMeters / 1000)}km en ${formatDuration(record.durationSeconds)}")
         return true
@@ -815,6 +835,22 @@ class FreeRideService : Service() {
     }
 
     private fun vibrateKmAlert() {
+        vibrate { VibrationEffect.createWaveform(longArrayOf(0, 200, 100, 200), -1) }
+    }
+
+    /**
+     * Spec 009, R3: la vuelta manual se ha guardado → marcador en el mapa, aviso en pantalla y
+     * vibración corta (RF-3.1). Solo se llama cuando la vuelta NO se ignora (RF-3.4).
+     */
+    private fun confirmManualLap(number: Int, latitude: Double, longitude: Double) {
+        val hasFix = latitude != 0.0 || longitude != 0.0
+        val mark = LapMark(number, latitude.takeIf { hasFix }, longitude.takeIf { hasFix })
+        _lapMarks.update { it + mark }
+        _lapEvents.tryEmit(mark)
+        vibrate { VibrationEffect.createOneShot(LAP_VIBRATION_MS, VibrationEffect.DEFAULT_AMPLITUDE) }
+    }
+
+    private fun vibrate(effect: () -> VibrationEffect) {
         try {
             val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 (getSystemService(VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
@@ -822,7 +858,7 @@ class FreeRideService : Service() {
                 @Suppress("DEPRECATION")
                 getSystemService(VIBRATOR_SERVICE) as Vibrator
             }
-            vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 200, 100, 200), -1))
+            vibrator.vibrate(effect())
         } catch (e: Exception) {
             Log.w(TAG, "No se pudo vibrar: ${e.message}")
         }
@@ -857,7 +893,7 @@ class FreeRideService : Service() {
             )
         }
         _laps.update { emptyList() }
-        _mapPoints.update { emptyList() }
+        clearLiveMap()
         currentSessionId = null
         updateNotification("Ruta Libre", "Preparado para iniciar")
     }
@@ -988,20 +1024,22 @@ class FreeRideService : Service() {
     }
 
     /**
-     * Añade un punto al mapa en tiempo real
+     * Añade un punto al mapa en tiempo real (spec 009, R1): la ruta entera, aligerada.
      */
     private fun addMapPoint(latitude: Double, longitude: Double) {
-        val newPoint = MapPoint(latitude, longitude)
-
-        _mapPoints.update { currentPoints ->
-            val newList = currentPoints + newPoint
-            // Limitar el número de puntos en memoria
-            if (newList.size > MAX_MAP_POINTS) {
-                newList.takeLast(MAX_MAP_POINTS)
-            } else {
-                newList
-            }
+        synchronized(routeSimplifier) {
+            routeSimplifier.add(MapPoint(latitude, longitude))
+            _mapPoints.value = routeSimplifier.points()
         }
+    }
+
+    /** Vacía lo que se dibuja en el mapa en vivo (al empezar y al volver a reposo). */
+    private fun clearLiveMap() {
+        synchronized(routeSimplifier) {
+            routeSimplifier.reset()
+            _mapPoints.value = emptyList()
+        }
+        _lapMarks.value = emptyList()
     }
 
     // ============================================================================

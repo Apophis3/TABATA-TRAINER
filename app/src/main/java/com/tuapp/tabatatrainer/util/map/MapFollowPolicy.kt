@@ -25,6 +25,7 @@ object MapFollowPolicy {
      * @param lastUserInteractionMs instante (reloj monótono) del último gesto del usuario; null = nunca.
      * @param isUserGestureActive el usuario está moviendo el mapa ahora mismo.
      * @param userZoom último zoom en que el usuario dejó el mapa; null = nunca lo tocó.
+     * @param isOverview el usuario pulsó «Ver todo» (spec 009, R2): no se sigue.
      */
     fun decide(
         isTracking: Boolean,
@@ -33,10 +34,22 @@ object MapFollowPolicy {
         lastUserInteractionMs: Long?,
         nowMs: Long,
         currentZoom: Float,
-        userZoom: Float?
+        userZoom: Float?,
+        isOverview: Boolean = false
     ): Action {
+        // R2 (spec 009): en «Ver todo» la cámara no sigue la posición hasta que se sale del modo
+        if (isOverview) return Action.NONE
         if (!isTracking || !hasLocation || isUserGestureActive) return Action.NONE
         if (lastUserInteractionMs != null && nowMs - lastUserInteractionMs < USER_IDLE_MS) return Action.NONE
         return if (abs(currentZoom - targetZoom(userZoom)) > ZOOM_TOLERANCE) Action.CENTER_AND_ZOOM else Action.CENTER
+    }
+
+    /** RF-2.3: el zoom de «Ver todo» no cuenta como zoom elegido por el usuario. */
+    fun shouldRecordUserZoom(isOverview: Boolean): Boolean = !isOverview
+
+    /** RF-2.4: «Ver todo» necesita al menos 2 puntos distintos para encuadrar algo. */
+    fun canShowOverview(points: List<Pair<Double, Double>>): Boolean {
+        val first = points.firstOrNull() ?: return false
+        return points.any { it.first != first.first || it.second != first.second }
     }
 }

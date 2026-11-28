@@ -33,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -50,10 +51,12 @@ import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.maps.model.LatLngBounds
 import com.google.maps.android.compose.*
 import com.tuapp.tabatatrainer.service.FreeRideService
 import com.tuapp.tabatatrainer.service.FreeRideStats
 import com.tuapp.tabatatrainer.service.LapData
+import com.tuapp.tabatatrainer.service.LapMark
 import com.tuapp.tabatatrainer.service.MapPoint
 import com.tuapp.tabatatrainer.sensor.SlotStatus
 import com.tuapp.tabatatrainer.ui.components.BatteryLowWarnings
@@ -83,6 +86,11 @@ private const val LAP_TAP_GUARD_AFTER_START_MS = 1000L
 
 /** Tiempo que el banner de km completado permanece en pantalla (R3) */
 private const val KM_BANNER_MILLIS = 4000L
+
+/** Spec 009, RF-3.2: aviso «🏁 Vuelta N» (zoom de entrada y tiempo en pantalla) */
+private const val LAP_BANNER_MILLIS = 1500L
+private const val LAP_BANNER_ZOOM_MILLIS = 500
+private const val LAP_BANNER_START_SCALE = 1.4f
 
 /** Ventanas del pager (R8): 1 Métricas · 2 Mapa · 3 Vueltas resumida · 4 Tabla de vueltas */
 private const val PAGE_METRICS = 0
@@ -115,6 +123,7 @@ fun FreeRideScreen(
     val stats by service?.stats?.collectAsState() ?: remember { mutableStateOf(FreeRideStats()) }
     val laps by service?.laps?.collectAsState() ?: remember { mutableStateOf(emptyList<LapData>()) }
     val mapPoints by service?.mapPoints?.collectAsState() ?: remember { mutableStateOf(emptyList<MapPoint>()) }
+    val lapMarks by service?.lapMarks?.collectAsState() ?: remember { mutableStateOf(emptyList<LapMark>()) }
 
     val pagerState = rememberPagerState(pageCount = { PAGE_COUNT })
     val pagerScope = rememberCoroutineScope()
@@ -126,6 +135,20 @@ fun FreeRideScreen(
             kmBanner = alert
             delay(KM_BANNER_MILLIS)
             kmBanner = null
+        }
+    }
+
+    // Spec 009, R3: aviso «🏁 Vuelta N» con un pequeño zoom al guardarse una vuelta manual
+    // (la vibración la pone el servicio)
+    var lapBanner by remember { mutableStateOf<LapMark?>(null) }
+    val lapBannerScale = remember { Animatable(1f) }
+    LaunchedEffect(service) {
+        service?.lapEvents?.collectLatest { mark ->
+            lapBanner = mark
+            lapBannerScale.snapTo(LAP_BANNER_START_SCALE)
+            lapBannerScale.animateTo(1f, tween(LAP_BANNER_ZOOM_MILLIS, easing = FastOutSlowInEasing))
+            delay(LAP_BANNER_MILLIS - LAP_BANNER_ZOOM_MILLIS)
+            lapBanner = null
         }
     }
 
@@ -203,7 +226,7 @@ fun FreeRideScreen(
                         MetricsPage(stats, onStart, onPause, onResume, onStop, onLap, onReconnect, onOpenDevices)
                     }
                 }
-                PAGE_MAP -> MapPage(stats, mapPoints, onPause, onResume)
+                PAGE_MAP -> MapPage(stats, mapPoints, lapMarks, onPause, onResume)
                 PAGE_LAPS -> {
                     if (isLandscape) {
                         LandscapeLapsPage(stats, laps, onStart, onPause, onResume, onStop, onLap, onOpenDevices)
@@ -253,6 +276,28 @@ fun FreeRideScreen(
             ) {
                 Text(
                     text = alert.bannerText(),
+                    color = Color.Black,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 22.sp,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp)
+                )
+            }
+        }
+
+        // Spec 009, RF-3.2: aviso de vuelta guardada (debajo del de km si coinciden)
+        lapBanner?.let { mark ->
+            Surface(
+                color = Color(0xFFFFD700),
+                shape = RoundedCornerShape(24.dp),
+                shadowElevation = 6.dp,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = if (kmBanner != null) 72.dp else 12.dp)
+                    .scale(lapBannerScale.value)
+            ) {
+                Text(
+                    text = "🏁 Vuelta ${mark.number}",
                     color = Color.Black,
                     fontWeight = FontWeight.Bold,
                     fontSize = 22.sp,
@@ -475,6 +520,7 @@ private fun rememberHeartRateCardLayout(slots: List<SlotStatus>): HeartRateCardL
 private fun MapPage(
     stats: FreeRideStats,
     mapPoints: List<MapPoint>,
+    lapMarks: List<LapMark>,
     onPause: () -> Unit,
     onResume: () -> Unit
 ) {
@@ -488,6 +534,7 @@ private fun MapPage(
         } else {
             RealTimeGoogleMap(
                 mapPoints = mapPoints,
+                lapMarks = lapMarks,
                 currentLatitude = stats.latitude,
                 currentLongitude = stats.longitude,
                 isTracking = stats.isRunning && !stats.isPaused
@@ -537,6 +584,7 @@ private fun MapPage(
 @Composable
 private fun RealTimeGoogleMap(
     mapPoints: List<MapPoint>,
+    lapMarks: List<LapMark>,
     currentLatitude: Double,
     currentLongitude: Double,
     isTracking: Boolean
@@ -560,6 +608,10 @@ private fun RealTimeGoogleMap(
     // R9: último toque del usuario en el mapa (pellizco, arrastre o botones +/-) y el zoom en que lo dejó
     var lastUserInteractionMs by rememberSaveable { mutableStateOf<Long?>(null) }
     var userZoom by rememberSaveable { mutableStateOf<Float?>(null) }
+    // Spec 009, R2: «Ver todo» activo → la cámara no sigue la posición
+    var overview by rememberSaveable { mutableStateOf(false) }
+    val mapScope = rememberCoroutineScope()
+    val overviewPaddingPx = with(LocalDensity.current) { 48.dp.roundToPx() }
     val reason = cameraPositionState.cameraMoveStartedReason
     val isUserMove = reason == CameraMoveStartedReason.GESTURE || reason == CameraMoveStartedReason.API_ANIMATION
 
@@ -572,7 +624,8 @@ private fun RealTimeGoogleMap(
     LaunchedEffect(cameraPositionState.isMoving) {
         if (!isUserMove) return@LaunchedEffect
         lastUserInteractionMs = SystemClock.elapsedRealtime()
-        if (!cameraPositionState.isMoving) {
+        // RF-2.3: el zoom tocado en «Ver todo» no pasa a ser el zoom de seguimiento
+        if (!cameraPositionState.isMoving && MapFollowPolicy.shouldRecordUserZoom(overview)) {
             userZoom = cameraPositionState.position.zoom
             // TEMPORAL (T-11): solo movimientos del usuario, no los del seguimiento (1 por segundo)
             Log.d("MapDiag", "usuario deja zoom=$userZoom reason=$reason tracking=$isTracking")
@@ -589,7 +642,8 @@ private fun RealTimeGoogleMap(
             lastUserInteractionMs = lastUserInteractionMs,
             nowMs = SystemClock.elapsedRealtime(),
             currentZoom = cameraPositionState.position.zoom,
-            userZoom = userZoom
+            userZoom = userZoom,
+            isOverview = overview
         )
         when (action) {
             MapFollowPolicy.Action.NONE -> Unit
@@ -610,6 +664,40 @@ private fun RealTimeGoogleMap(
         MapUiSettings(zoomControlsEnabled = true, compassEnabled = true, myLocationButtonEnabled = false, mapToolbarEnabled = false)
     }
 
+    // RF-2.1: encuadra la ruta entera más la posición actual
+    val onToggleOverview: () -> Unit = {
+        if (!overview) {
+            val all = routeCoordinates + listOfNotNull(currentLocation)
+            if (MapFollowPolicy.canShowOverview(all.map { it.latitude to it.longitude })) {
+                overview = true
+                val bounds = LatLngBounds.builder().apply { all.forEach { include(it) } }.build()
+                mapScope.launch {
+                    try {
+                        cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(bounds, overviewPaddingPx), 700)
+                    } catch (e: Exception) {
+                        Log.w("MapDiag", "Ver todo no pudo encuadrar: ${e.message}")
+                    }
+                }
+            }
+        } else {
+            // RF-2.3: vuelve a seguir ya, con el zoom que eligió el usuario antes de «Ver todo»
+            overview = false
+            lastUserInteractionMs = null
+            currentLocation?.let { loc ->
+                mapScope.launch {
+                    try {
+                        cameraPositionState.animate(
+                            CameraUpdateFactory.newLatLngZoom(loc, MapFollowPolicy.targetZoom(userZoom)), 500
+                        )
+                    } catch (e: Exception) {
+                        Log.w("MapDiag", "No se pudo volver a seguir: ${e.message}")
+                    }
+                }
+            }
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
     GoogleMap(
         modifier = Modifier.fillMaxSize(),
         cameraPositionState = cameraPositionState,
@@ -630,6 +718,21 @@ private fun RealTimeGoogleMap(
             )
         }
 
+        // Spec 009, RF-3.3: una banderita amarilla donde se marcó cada vuelta manual
+        lapMarks.forEach { mark ->
+            val lat = mark.latitude
+            val lon = mark.longitude
+            if (lat != null && lon != null) {
+                key(mark.number) {
+                    Marker(
+                        state = remember { MarkerState(position = LatLng(lat, lon)) },
+                        title = "Vuelta ${mark.number}",
+                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_YELLOW)
+                    )
+                }
+            }
+        }
+
         currentLocation?.let { loc ->
             Marker(
                 state = MarkerState(position = loc),
@@ -637,6 +740,32 @@ private fun RealTimeGoogleMap(
                 icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)
             )
         }
+    }
+
+    // Spec 009, R2: botón «Ver todo» / «Seguir» arriba a la derecha
+    Surface(
+        onClick = onToggleOverview,
+        color = if (overview) Color(0xFFFFD700) else Color.White,
+        contentColor = Color.Black,
+        shape = RoundedCornerShape(20.dp),
+        shadowElevation = 4.dp,
+        modifier = Modifier
+            .align(Alignment.TopEnd)
+            .padding(top = 16.dp, end = 16.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+        ) {
+            Icon(
+                if (overview) Icons.Default.GpsFixed else Icons.Default.ZoomOutMap,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(if (overview) "Seguir" else "Ver todo", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        }
+    }
     }
 }
 

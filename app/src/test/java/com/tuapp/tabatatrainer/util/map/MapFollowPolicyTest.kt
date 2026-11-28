@@ -73,4 +73,33 @@ class MapFollowPolicyTest {
         assertEquals(Action.CENTER_AND_ZOOM, decide(lastTouch = now - USER_IDLE_MS, userZoom = 18f, zoom = 3f))
         assertEquals(18f, MapFollowPolicy.targetZoom(18f))
     }
+
+    // --- Spec 009, R2: «Ver todo» ---
+
+    @Test
+    fun overview_blocks_following_even_after_idle_window() {
+        assertEquals(Action.NONE, MapFollowPolicy.decide(true, true, false, null, now, 3f, null, isOverview = true))
+        assertEquals(Action.NONE,
+            MapFollowPolicy.decide(true, true, false, now - USER_IDLE_MS * 10, now, 12f, 18f, isOverview = true))
+    }
+
+    @Test
+    fun leaving_overview_follows_again_with_user_zoom() {
+        assertEquals(Action.CENTER_AND_ZOOM,
+            MapFollowPolicy.decide(true, true, false, null, now, 12f, 18f, isOverview = false))
+    }
+
+    @Test
+    fun overview_zoom_is_not_recorded_as_user_zoom() {
+        assertEquals(false, MapFollowPolicy.shouldRecordUserZoom(isOverview = true))
+        assertEquals(true, MapFollowPolicy.shouldRecordUserZoom(isOverview = false))
+    }
+
+    @Test
+    fun overview_needs_two_distinct_points() {
+        assertEquals(false, MapFollowPolicy.canShowOverview(emptyList()))
+        assertEquals(false, MapFollowPolicy.canShowOverview(listOf(28.0 to -16.0)))
+        assertEquals(false, MapFollowPolicy.canShowOverview(listOf(28.0 to -16.0, 28.0 to -16.0)))
+        assertEquals(true, MapFollowPolicy.canShowOverview(listOf(28.0 to -16.0, 28.0001 to -16.0)))
+    }
 }
